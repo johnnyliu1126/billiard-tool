@@ -206,8 +206,8 @@
 <div class="cue-controls">
   <div class="ctrl-group">
     <span class="ctrl-label">速度</span>
-    <input type="range" id="speedSlider" min="1" max="10" value="4" step="0.5">
-    <span class="speed-val" id="speedVal">4</span>
+    <input type="range" id="speedSlider" min="1" max="10" value="3" step="0.5">
+    <span class="speed-val" id="speedVal">3</span>
   </div>
   <div class="ctrl-group">
     <span class="ctrl-label">杆法</span>
@@ -265,7 +265,8 @@ let simStartTime = 0;
 let simPhysicsBodies = null;
 let simMmToMatter = 0.001;
 let hasCalculated = false;
-let cueSpeed = 4;      // m/s, default 4
+let simResult = null;  // { targetPocketed: bool, cueScratched: bool }
+let cueSpeed = 3;      // m/s, default 3
 let cueHeight = 'mid'; // 'high' | 'mid' | 'low'
 let cueSpin = 'none';  // 'left' | 'none' | 'right'
 
@@ -669,20 +670,48 @@ function drawPhysicsTrails() {
 
   physicsTrails.forEach((trail) => {
     if (trail.points.length < 2) return;
-    ctx.strokeStyle = trail.color;
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.6;
 
-    ctx.beginPath();
-    const p0 = toCanvas(trail.points[0].x, trail.points[0].y);
-    ctx.moveTo(p0.x, p0.y);
-    for (let i = 1; i < trail.points.length; i++) {
-      const pt = toCanvas(trail.points[i].x, trail.points[i].y);
-      ctx.lineTo(pt.x, pt.y);
+    // Draw fading trail - recent points are brighter
+    const total = trail.points.length;
+    for (let i = 1; i < total; i++) {
+      const alpha = 0.2 + 0.7 * (i / total); // fade from old to new
+      const width = 1 + 4 * (i / total); // thinner old, thicker new
+
+      ctx.strokeStyle = trail.color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+
+      const p0 = toCanvas(trail.points[i-1].x, trail.points[i-1].y);
+      const p1 = toCanvas(trail.points[i].x, trail.points[i].y);
+
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.globalAlpha = 1;
   });
+
+  // Draw current ball positions as bright dots during simulation
+  if (simRunning && simPhysicsBodies) {
+    simPhysicsBodies.forEach((pb) => {
+      const bx = pb.body.position.x / simMmToMatter;
+      const by = pb.body.position.y / simMmToMatter;
+      const p = toCanvas(bx, by);
+      const r = BALL_R * tableScale;
+
+      // Glow ring
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+      ctx.strokeStyle = pb.type === 'cue' ? `rgba(255,255,255,${0.5 + pulse * 0.4})` :
+                       pb.type === 'target' ? `rgba(100,180,255,${0.5 + pulse * 0.4})` :
+                       `rgba(255,80,80,0.3)`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+  }
 }
 
 function drawDragPreview() {
@@ -700,6 +729,43 @@ function drawDragPreview() {
   ctx.setLineDash([]);
 }
 
+function drawSimOverlay() {
+  if (!simResult || simRunning) return;
+
+  const cw = canvas.width / (Math.min(window.devicePixelRatio || 1, 2));
+  const ch = canvas.height / (Math.min(window.devicePixelRatio || 1, 2));
+  const midX = cw / 2;
+  const midY = ch / 2;
+
+  // Dim background
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Result badge
+  let text, color;
+  if (simResult.targetPocketed) {
+    text = '🎯 进球!';
+    color = '#4CAF50';
+  } else if (simResult.cueScratched) {
+    text = '⚠ 母球落袋';
+    color = '#FF9800';
+  } else {
+    text = '未进球';
+    color = '#f44336';
+  }
+
+  ctx.fillStyle = color;
+  ctx.font = 'bold 28px -apple-system, "PingFang SC", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Text shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillText(text, midX + 1, midY + 1);
+  ctx.fillStyle = color;
+  ctx.fillText(text, midX, midY);
+}
+
 function drawAll() {
   resize();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -708,6 +774,7 @@ function drawAll() {
   drawRoutes();
   drawBalls();
   drawDragPreview();
+  drawSimOverlay();
 }
 
 function loop() {
@@ -762,6 +829,7 @@ function addBall(x, y, type) {
   balls.push({ x, y, type });
   calculatedRoutes = [];
   hasCalculated = false;
+  simResult = null;
   updateInfo();
 }
 
@@ -1075,7 +1143,7 @@ function calculateKickRoutes() {
 }
 
 // ==================== PHYSICS SIMULATION ====================
-function stopSimulation() {
+function stopSimulation(finalResult) {
   if (physicsRunner) {
     Matter.Runner.stop(physicsRunner);
     physicsRunner = null;
@@ -1086,8 +1154,15 @@ function stopSimulation() {
   }
   simRunning = false;
   simPhysicsBodies = null;
+  simResult = finalResult || null;
   const btn = document.getElementById('btnSim');
-  btn.textContent = '物理模拟';
+  if (finalResult) {
+    btn.textContent = finalResult.targetPocketed ? '物理模拟 ✓进球' :
+                      finalResult.cueScratched ? '物理模拟 ✗母球落袋' :
+                      '物理模拟 ✗未进';
+  } else {
+    btn.textContent = '物理模拟';
+  }
 }
 
 function runSimulation(route) {
@@ -1308,7 +1383,7 @@ function runSimulation(route) {
   function step() {
     if (!simRunning) return;
     if (frameCount >= maxFrames) {
-      stopSimulation();
+      stopSimulation(null);
       document.getElementById('btnSim').textContent = '物理模拟';
       return;
     }
@@ -1329,22 +1404,20 @@ function runSimulation(route) {
 
     // Stop if target ball is pocketed
     if (targetPocketed && frameCount > 30) {
-      stopSimulation();
-      document.getElementById('btnSim').textContent = '物理模拟 ✓进球';
+      stopSimulation({ targetPocketed: true, cueScratched: false });
       return;
     }
 
     // Stop if cue ball scratches
     if (cuePocketed && frameCount > 30) {
-      stopSimulation();
-      document.getElementById('btnSim').textContent = '物理模拟 ✗母球落袋';
+      stopSimulation({ targetPocketed: false, cueScratched: true });
       return;
     }
 
     // Stop if all balls are nearly still
     let allStill = true;
     for (const pb of physicsBalls) {
-      if (pb.type === 'obstacle') continue; // obstacles are static
+      if (pb.type === 'obstacle') continue;
       const v = pb.body.velocity;
       if (Math.abs(v.x) > 0.05 || Math.abs(v.y) > 0.05) {
         allStill = false;
@@ -1352,8 +1425,7 @@ function runSimulation(route) {
       }
     }
     if (allStill && frameCount > 60) {
-      stopSimulation();
-      document.getElementById('btnSim').textContent = '物理模拟 ' + (targetPocketed ? '✓进球' : '');
+      stopSimulation({ targetPocketed, cueScratched: cuePocketed });
       return;
     }
 
@@ -1417,8 +1489,9 @@ document.querySelectorAll('.cushion-btn').forEach(btn => {
 
 // Calculate button
 document.getElementById('btnCalc').addEventListener('click', () => {
-  if (simRunning) stopSimulation();
+  if (simRunning) stopSimulation(null);
   physicsTrails = [];
+  simResult = null;
   calculatedRoutes = calculateKickRoutes();
   hasCalculated = true;
   updateInfo();
