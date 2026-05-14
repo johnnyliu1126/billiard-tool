@@ -107,6 +107,64 @@
     background: rgba(255,255,255,0.08);
     border-color: rgba(255,255,255,0.2);
   }
+  .cue-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.2);
+    justify-content: center;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    font-size: 11px;
+  }
+  .cue-controls .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .cue-controls .ctrl-label {
+    color: #888;
+    font-size: 10px;
+    white-space: nowrap;
+    min-width: 22px;
+  }
+  .cue-controls input[type="range"] {
+    -webkit-appearance: none;
+    width: 70px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.2);
+    outline: none;
+  }
+  .cue-controls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+  .cue-controls .speed-val {
+    color: #fff;
+    font-size: 11px;
+    min-width: 28px;
+    text-align: center;
+    font-weight: 600;
+  }
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 14px;
+    border: 1.5px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.05);
+    color: #aaa;
+    cursor: pointer;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-sm.active { border-color: var(--gold); background: rgba(240,192,64,0.15); color: var(--gold); }
+  .btn-sm:active { transform: scale(0.95); }
   .route-info {
     color: #aaa;
     font-size: 11px;
@@ -144,6 +202,25 @@
   <button class="btn primary" id="btnCalc">计算路线</button>
   <button class="btn simulate" id="btnSim">物理模拟</button>
   <button class="btn danger" id="btnClear">清空</button>
+</div>
+<div class="cue-controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">速度</span>
+    <input type="range" id="speedSlider" min="1" max="10" value="4" step="0.5">
+    <span class="speed-val" id="speedVal">4</span>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">杆法</span>
+    <button class="btn-sm" data-height="low">低</button>
+    <button class="btn-sm active" data-height="mid">中</button>
+    <button class="btn-sm" data-height="high">高</button>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">赛</span>
+    <button class="btn-sm active" data-spin="none">无</button>
+    <button class="btn-sm" data-spin="left">左</button>
+    <button class="btn-sm" data-spin="right">右</button>
+  </div>
 </div>
 
 <script>
@@ -188,6 +265,9 @@ let simStartTime = 0;
 let simPhysicsBodies = null;
 let simMmToMatter = 0.001;
 let hasCalculated = false;
+let cueSpeed = 4;      // m/s, default 4
+let cueHeight = 'mid'; // 'high' | 'mid' | 'low'
+let cueSpin = 'none';  // 'left' | 'none' | 'right'
 
 // ==================== CANVAS SETUP ====================
 const canvas = document.getElementById('canvas');
@@ -1145,19 +1225,56 @@ function runSimulation(route) {
 
   // Calculate initial velocity for cue ball
   const firstCushion = route.cushionPoints[0];
-  const ang = Math.atan2(
+  let aimAng = Math.atan2(
     firstCushion.y - route.points[0].y,
     firstCushion.x - route.points[0].x
   );
-  const speed = 4000 * mmToMatter; // 4 m/s in Matter.js units
+
+  // Apply side spin: slight angle adjustment (max ~3 degrees)
+  if (cueSpin === 'left') aimAng -= 0.05;
+  if (cueSpin === 'right') aimAng += 0.05;
+
+  const speed = cueSpeed * 1000 * mmToMatter; // user speed in m/s
 
   const cueBody = physicsBalls.find(b => b.type === 'cue')?.body;
   if (cueBody) {
     Body.setVelocity(cueBody, {
-      x: Math.cos(ang) * speed,
-      y: Math.sin(ang) * speed,
+      x: Math.cos(aimAng) * speed,
+      y: Math.sin(aimAng) * speed,
     });
+
+    // Side spin: angular velocity (rad/s in simulation)
+    if (cueSpin === 'left') Body.setAngularVelocity(cueBody, -30);
+    else if (cueSpin === 'right') Body.setAngularVelocity(cueBody, 30);
   }
+
+  // High/Low cue effect: modify cue ball velocity after hitting target
+  let cueHitTarget = false;
+  Events.on(engine, 'collisionStart', (event) => {
+    event.pairs.forEach((pair) => {
+      const a = pair.bodyA, b = pair.bodyB;
+      const cueHit = a.label === 'cue' ? a : (b.label === 'cue' ? b : null);
+      const targetHit = a.label === 'target' ? a : (b.label === 'target' ? b : null);
+      if (cueHit && targetHit && !cueHitTarget) {
+        cueHitTarget = true;
+        const cv = cueHit.velocity;
+        if (cueHeight === 'high') {
+          // Follow: add forward velocity
+          Body.setVelocity(cueHit, {
+            x: cv.x * 1.3,
+            y: cv.y * 1.3,
+          });
+        } else if (cueHeight === 'low') {
+          // Draw: reverse velocity
+          Body.setVelocity(cueHit, {
+            x: -cv.x * 0.5,
+            y: -cv.y * 0.5,
+          });
+        }
+        // 'mid': normal collision, no modification
+      }
+    });
+  });
 
   // Trail tracking
   const trailData = physicsBalls.map((b, i) => ({
@@ -1333,6 +1450,32 @@ document.getElementById('btnClear').addEventListener('click', () => {
   physicsTrails = [];
   document.getElementById('btnSim').textContent = '物理模拟';
   updateInfo();
+});
+
+// Speed slider
+const speedSlider = document.getElementById('speedSlider');
+const speedVal = document.getElementById('speedVal');
+speedSlider.addEventListener('input', () => {
+  cueSpeed = parseFloat(speedSlider.value);
+  speedVal.textContent = cueSpeed;
+});
+
+// Cue height buttons
+document.querySelectorAll('[data-height]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-height]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    cueHeight = btn.dataset.height;
+  });
+});
+
+// Cue spin buttons
+document.querySelectorAll('[data-spin]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-spin]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    cueSpin = btn.dataset.spin;
+  });
 });
 
 // Initial draw
