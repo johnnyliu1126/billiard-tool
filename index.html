@@ -185,6 +185,8 @@ let physicsRunner = null;
 let physicsTrails = [];
 let simRunning = false;
 let simStartTime = 0;
+let simPhysicsBodies = null;
+let simMmToMatter = 0.001;
 let hasCalculated = false;
 
 // ==================== CANVAS SETUP ====================
@@ -382,59 +384,109 @@ function drawBalls() {
   const s = tableScale;
   const r = BALL_R * s;
 
-  balls.forEach((ball) => {
-    const p = toCanvas(ball.x, ball.y);
+  // During simulation, draw Matter.js body positions
+  const bodies = simRunning ? simPhysicsBodies : null;
 
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.arc(p.x + 1.5, p.y + 1.5, r, 0, Math.PI * 2);
-    ctx.fill();
+  if (bodies) {
+    bodies.forEach((pb) => {
+      const bx = pb.body.position.x / simMmToMatter;
+      const by = pb.body.position.y / simMmToMatter;
+      const p = toCanvas(bx, by);
 
-    // Ball body
-    let color, borderColor;
-    if (ball.type === 'cue') {
-      color = '#f5f5f0';
-      borderColor = '#ccc';
-    } else if (ball.type === 'target') {
-      color = '#2266cc';
-      borderColor = '#1144aa';
-    } else if (ball.type === 'obstacle') {
-      color = '#cc3333';
-      borderColor = '#991111';
-    }
-
-    const grad = ctx.createRadialGradient(p.x - r*0.3, p.y - r*0.3, r*0.1, p.x, p.y, r);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, borderColor);
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.beginPath();
-    ctx.arc(p.x - r*0.25, p.y - r*0.3, r*0.35, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Stripe for obstacle balls
-    if (ball.type === 'obstacle') {
-      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y, r*0.85, r*0.3, 0, 0, Math.PI * 2);
+      ctx.arc(p.x + 1.5, p.y + 1.5, r, 0, Math.PI * 2);
       ctx.fill();
-    }
 
-    // Number label for target
-    if (ball.type === 'target') {
-      ctx.fillStyle = '#fff';
-      ctx.font = `bold ${Math.max(10, r*0.8)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('目', p.x, p.y);
-    }
-  });
+      let color, borderColor;
+      if (pb.type === 'cue') { color = '#f5f5f0'; borderColor = '#ccc'; }
+      else if (pb.type === 'target') { color = '#2266cc'; borderColor = '#1144aa'; }
+      else if (pb.type === 'obstacle') { color = '#cc3333'; borderColor = '#991111'; }
+
+      const grad = ctx.createRadialGradient(p.x - r*0.3, p.y - r*0.3, r*0.1, p.x, p.y, r);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, borderColor);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.arc(p.x - r*0.25, p.y - r*0.3, r*0.35, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (pb.type === 'obstacle') {
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, r*0.85, r*0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (pb.type === 'target') {
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.max(10, r*0.8)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('目', p.x, p.y);
+      }
+    });
+  } else {
+    balls.forEach((ball) => {
+      const p = toCanvas(ball.x, ball.y);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.arc(p.x + 1.5, p.y + 1.5, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ball body
+      let color, borderColor;
+      if (ball.type === 'cue') {
+        color = '#f5f5f0';
+        borderColor = '#ccc';
+      } else if (ball.type === 'target') {
+        color = '#2266cc';
+        borderColor = '#1144aa';
+      } else if (ball.type === 'obstacle') {
+        color = '#cc3333';
+        borderColor = '#991111';
+      }
+
+      const grad = ctx.createRadialGradient(p.x - r*0.3, p.y - r*0.3, r*0.1, p.x, p.y, r);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, borderColor);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.arc(p.x - r*0.25, p.y - r*0.3, r*0.35, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Stripe for obstacle balls
+      if (ball.type === 'obstacle') {
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, r*0.85, r*0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Number label for target
+      if (ball.type === 'target') {
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.max(10, r*0.8)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('目', p.x, p.y);
+      }
+    });
+  }
 
   // Pocket target indicator
   if (pocketTarget) {
@@ -953,6 +1005,7 @@ function stopSimulation() {
     physicsWorld = null;
   }
   simRunning = false;
+  simPhysicsBodies = null;
   const btn = document.getElementById('btnSim');
   btn.textContent = '物理模拟';
 }
@@ -1076,6 +1129,7 @@ function runSimulation(route) {
     density: 0.005,
   };
 
+  simMmToMatter = mmToMatter;
   const physicsBalls = [];
   balls.forEach((b) => {
     const body = Bodies.circle(
@@ -1086,6 +1140,8 @@ function runSimulation(route) {
     physicsBalls.push({ body, type: b.type });
     World.add(physicsWorld, body);
   });
+
+  simPhysicsBodies = physicsBalls;
 
   // Calculate initial velocity for cue ball
   const firstCushion = route.cushionPoints[0];
