@@ -1146,13 +1146,24 @@ canvas.addEventListener('pointerdown', (e) => {
 
   // Cushion drag on first cushion point (main interface, no modal needed)
   if (calculatedRoutes.length > 0 && selectedType !== 'pocket') {
+    // If custom route exists, check tap on ORIGINAL first point → reset custom
+    if (customRoute && selectedRouteIndex < calculatedRoutes.length) {
+      const origCp = calculatedRoutes[selectedRouteIndex].cushionPoints[0];
+      const odx = log.x - origCp.x, ody = log.y - origCp.y;
+      if (Math.sqrt(odx * odx + ody * ody) < BALL_R * 5) {
+        customRoute = null;
+        return;
+      }
+    }
+    // Check tap on current first cushion point → start drag
     const route = customRoute || calculatedRoutes[selectedRouteIndex];
     if (route && route.cushionPoints.length > 0) {
       const firstCp = route.cushionPoints[0];
       const dx = log.x - firstCp.x, dy = log.y - firstCp.y;
-      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 5) {
+      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 8) {
         cushionDragStartPos = { x: log.x, y: log.y };
-        canvas.setPointerCapture(e.pointerId);
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
         return;
       }
     }
@@ -1218,24 +1229,39 @@ canvas.addEventListener('pointerdown', (e) => {
   addBall(log.x, log.y, selectedType);
 });
 
-canvas.addEventListener('pointermove', (e) => {
-  // Cushion drag — real-time path recalculation
-  if (cushionDragStartPos) {
-    const pos = getEventPos(e);
-    const log = toLogical(pos.x, pos.y);
-    // Require minimum movement to enter drag mode (distinguish from tap)
-    const moveDx = log.x - cushionDragStartPos.x;
-    const moveDy = log.y - cushionDragStartPos.y;
-    if (!isDraggingCushionPoint && Math.abs(moveDx) + Math.abs(moveDy) < 3) return;
-    isDraggingCushionPoint = true;
-    const route = calculatedRoutes[selectedRouteIndex];
-    if (route && route.cushionPoints.length > 0) {
-      adjustedFirstCushion = snapToCushionSegment(log, route.sequence[0]);
-      customRoute = recalcPathFromFirstCushion(route, adjustedFirstCushion);
-    }
-    e.preventDefault();
-    return;
+// ==================== CUSHION DRAG (document-level for reliability) ====================
+function handleCushionDragMove(e) {
+  if (!cushionDragStartPos) return;
+  const pos = getEventPos(e);
+  const log = toLogical(pos.x, pos.y);
+  const moveDx = log.x - cushionDragStartPos.x;
+  const moveDy = log.y - cushionDragStartPos.y;
+  if (!isDraggingCushionPoint && Math.abs(moveDx) + Math.abs(moveDy) < 3) return;
+  isDraggingCushionPoint = true;
+  const route = calculatedRoutes[selectedRouteIndex];
+  if (route && route.cushionPoints.length > 0) {
+    adjustedFirstCushion = snapToCushionSegment(log, route.sequence[0]);
+    customRoute = recalcPathFromFirstCushion(route, adjustedFirstCushion);
   }
+  e.preventDefault();
+}
+
+function handleCushionDragUp(e) {
+  if (!cushionDragStartPos) return;
+  if (!isDraggingCushionPoint) {
+    customRoute = null; // tap, not drag — reset
+  }
+  isDraggingCushionPoint = false;
+  cushionDragStartPos = null;
+}
+
+document.addEventListener('pointermove', handleCushionDragMove, { passive: false });
+document.addEventListener('pointerup', handleCushionDragUp);
+
+canvas.addEventListener('pointermove', (e) => {
+  // Cushion drag (canvas-level, works with pointer capture)
+  handleCushionDragMove(e);
+  if (cushionDragStartPos) return;
   if (!draggingBall) return;
   if (longPressTriggered) return;
 
@@ -1267,16 +1293,8 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerup', () => {
-  if (cushionDragStartPos) {
-    if (!isDraggingCushionPoint) {
-      // Was a tap, not a drag — clear custom route & reselect
-      customRoute = null;
-    }
-    // customRoute stays if user dragged; otherwise cleared above
-    isDraggingCushionPoint = false;
-    cushionDragStartPos = null;
-    return;
-  }
+  // Cushion drag cleanup handled at document level
+  if (cushionDragStartPos) return;
   clearTimeout(longPressTimer);
   longPressTimer = null;
   if (!longPressTriggered) {
