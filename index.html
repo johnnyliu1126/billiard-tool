@@ -216,6 +216,78 @@
     flex-shrink: 0;
   }
   .route-chip .dist { color: #888; font-size: 9px; }
+
+  /* Aiming Modal */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.78); z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal-content {
+    background: var(--surface); border-radius: 16px; padding: 14px 16px;
+    max-width: 370px; width: 92vw; max-height: 88vh; overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px; color: #fff; font-weight: 600; font-size: 15px;
+  }
+  .modal-close {
+    background: none; border: none; color: #888; font-size: 22px;
+    cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  .modal-body { display: flex; flex-direction: column; gap: 10px; }
+  .modal-footer {
+    display: flex; gap: 8px; justify-content: flex-end;
+    margin-top: 14px; padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .aim-section { display: flex; flex-direction: column; gap: 5px; align-items: center; }
+  .aim-label { color: #aaa; font-size: 11px; text-align: center; width: 100%; }
+  .aim-label .hint { color: #666; font-size: 9px; }
+  .cue-face-wrap {
+    position: relative; width: 150px; height: 150px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #cueFaceCanvas {
+    border-radius: 50%; background: #1a1a1a;
+    cursor: pointer; touch-action: none;
+  }
+  .cue-face-hints {
+    display: flex; justify-content: space-between; width: 155px;
+    font-size: 9px; color: #555; margin-top: 2px;
+  }
+  .cushion-adjust-info {
+    font-size: 10px; color: var(--gold); text-align: center;
+    padding: 3px; min-height: 16px;
+  }
+  .modal-controls {
+    display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap;
+  }
+  .speed-val { color: #fff; font-size: 11px; min-width: 32px; text-align: center; font-weight: 600; }
+  .modal-controls input[type="range"] {
+    -webkit-appearance: none; width: 80px; height: 4px;
+    border-radius: 2px; background: rgba(255,255,255,0.2); outline: none;
+  }
+  .modal-controls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  .btn-sel {
+    padding: 5px 12px; font-size: 11px; border-radius: 14px;
+    border: 1.5px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.05); color: #aaa;
+    cursor: pointer; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-sel.active { border-color: var(--gold); background: rgba(240,192,64,0.15); color: var(--gold); }
+  .btn-sel:active { transform: scale(0.95); }
+  .btn.modal-sim {
+    background: #2e7d32; border-color: #2e7d32; color: #fff;
+    font-weight: 600; padding: 8px 20px; font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -267,6 +339,58 @@
     <button class="btn-sm active" data-spin="none">无</button>
     <button class="btn-sm" data-spin="left">左</button>
     <button class="btn-sm" data-spin="right">右</button>
+  </div>
+</div>
+
+<!-- Aiming Modal -->
+<div id="aimModal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span>⚡ 击球瞄准设置</span>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="aim-section">
+        <div class="aim-label">击球点 <span class="hint">(拖拽红点)</span></div>
+        <div class="cue-face-wrap">
+          <canvas id="cueFaceCanvas" width="150" height="150"></canvas>
+        </div>
+        <div class="cue-face-hints">
+          <span>高杆</span><span>中杆</span><span>低杆</span>
+        </div>
+      </div>
+      <div class="aim-section">
+        <div class="aim-label">首颗星微调 <span class="hint">(桌面拖拽星点)</span></div>
+        <div class="cushion-adjust-info" id="cushionAdjustInfo">点击桌面颗星点并拖拽调整</div>
+      </div>
+      <div class="aim-section">
+        <div class="aim-label">出杆速度</div>
+        <div class="modal-controls">
+          <input type="range" id="modalSpeedSlider" min="1" max="10" value="3" step="0.5">
+          <span class="speed-val" id="modalSpeedVal">3 m/s</span>
+        </div>
+      </div>
+      <div class="aim-section">
+        <div class="aim-label">杆法</div>
+        <div class="modal-controls">
+          <button class="btn-sel modal-height-btn" data-height="low">低杆</button>
+          <button class="btn-sel modal-height-btn active" data-height="mid">中杆</button>
+          <button class="btn-sel modal-height-btn" data-height="high">高杆</button>
+        </div>
+      </div>
+      <div class="aim-section">
+        <div class="aim-label">旋转(赛)</div>
+        <div class="modal-controls">
+          <button class="btn-sel modal-spin-btn active" data-spin="none">无</button>
+          <button class="btn-sel modal-spin-btn" data-spin="left">左赛</button>
+          <button class="btn-sel modal-spin-btn" data-spin="right">右赛</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn danger" id="modalCancel">取消</button>
+      <button class="btn modal-sim" id="modalStartSim">开始模拟 ▶</button>
+    </div>
   </div>
 </div>
 
@@ -323,6 +447,13 @@ let simResult = null;  // { targetPocketed: bool, cueScratched: bool }
 let cueSpeed = 3;      // m/s, default 3
 let cueHeight = 'mid'; // 'high' | 'mid' | 'low'
 let cueSpin = 'none';  // 'left' | 'none' | 'right'
+
+// Aiming modal state
+let cueFaceHitX = 0.5, cueFaceHitY = 0.5;
+let aimModalOpen = false;
+let adjustedFirstCushion = null;
+let isDraggingCueFace = false;
+let isDraggingCushionPoint = false;
 
 // ==================== CANVAS SETUP ====================
 const canvas = document.getElementById('canvas');
@@ -743,6 +874,28 @@ function drawRoutes() {
 
     ctx.globalAlpha = 1;
   });
+
+  // Draw adjustable first cushion point when modal is open
+  if (aimModalOpen && selectedRouteIndex < calculatedRoutes.length) {
+    const route = calculatedRoutes[selectedRouteIndex];
+    const adjPt = adjustedFirstCushion || (route.cushionPoints.length > 0 ? route.cushionPoints[0] : null);
+    if (adjPt) {
+      const p = toCanvas(adjPt.x, adjPt.y);
+      const r = BALL_R * tableScale * 1.3;
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
+      ctx.strokeStyle = `rgba(240, 192, 64, ${0.35 + pulse * 0.35})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f0c040';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5 * tableScale, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.max(9, 10*tableScale)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('拖拽调整', p.x, p.y - r - 4);
+    }
+  }
 }
 
 function drawPhysicsTrails() {
@@ -941,6 +1094,20 @@ canvas.addEventListener('pointerdown', (e) => {
   const pos = getEventPos(e);
   const log = toLogical(pos.x, pos.y);
 
+  // Cushion drag mode when modal is open
+  if (aimModalOpen && calculatedRoutes.length > 0) {
+    const route = calculatedRoutes[selectedRouteIndex];
+    if (route && route.cushionPoints.length > 0) {
+      const firstCp = adjustedFirstCushion || route.cushionPoints[0];
+      const dx = log.x - firstCp.x, dy = log.y - firstCp.y;
+      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 5) {
+        isDraggingCushionPoint = true;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+  }
+
   // Check if tapping on a route cushion hit point to select that route
   if (calculatedRoutes.length > 1 && selectedType !== 'pocket') {
     const tapRadius = BALL_R * 3; // generous tap target
@@ -1002,6 +1169,19 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
+  // Cushion drag in modal
+  if (isDraggingCushionPoint && aimModalOpen) {
+    const pos = getEventPos(e);
+    const log = toLogical(pos.x, pos.y);
+    const route = calculatedRoutes[selectedRouteIndex];
+    if (route && route.cushionPoints.length > 0) {
+      adjustedFirstCushion = snapToCushionSegment(log, route.sequence[0]);
+      document.getElementById('cushionAdjustInfo').textContent =
+        `颗星点: (${adjustedFirstCushion.x.toFixed(0)}, ${adjustedFirstCushion.y.toFixed(0)})`;
+    }
+    e.preventDefault();
+    return;
+  }
   if (!draggingBall) return;
   if (longPressTriggered) return;
 
@@ -1033,6 +1213,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerup', () => {
+  if (isDraggingCushionPoint) { isDraggingCushionPoint = false; return; }
   clearTimeout(longPressTimer);
   longPressTimer = null;
   if (!longPressTriggered) {
@@ -1372,10 +1553,10 @@ function buildCushionSegments() {
       for (const g of gaps) {
         const gs = g.pos - g.r - BALL_R;
         const ge = g.pos + g.r + BALL_R;
-        if (gs > start) segs.push({ x1: x1 + start, y1, x2: x1 + gs, y2 });
+        if (gs > start) segs.push({ x1: x1 + start, y1, x2: x1 + gs, y2, horiz: true });
         start = Math.max(start, ge);
       }
-      if (start < TABLE_W) segs.push({ x1: x1 + start, y1, x2, y2 });
+      if (start < TABLE_W) segs.push({ x1: x1 + start, y1, x2, y2, horiz: true });
     } else {
       const gaps = [
         { pos: 0, r: POCKET_R },
@@ -1385,10 +1566,10 @@ function buildCushionSegments() {
       for (const g of gaps) {
         const gs = g.pos - g.r - BALL_R;
         const ge = g.pos + g.r + BALL_R;
-        if (gs > start) segs.push({ x1, y1: y1 + start, x2, y2: y1 + gs });
+        if (gs > start) segs.push({ x1, y1: y1 + start, x2, y2: y1 + gs, horiz: false });
         start = Math.max(start, ge);
       }
-      if (start < TABLE_H) segs.push({ x1, y1: y1 + start, x2, y2 });
+      if (start < TABLE_H) segs.push({ x1, y1: y1 + start, x2, y2, horiz: false });
     }
   }
   add(0, 0, TABLE_W, 0, true);
@@ -1407,6 +1588,171 @@ function closestPt(px, py, x1, y1, x2, y2) {
   if (l2 === 0) return { x: x1, y: y1 };
   const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / l2));
   return { x: x1 + t * dx, y: y1 + t * dy };
+}
+
+// ==================== AIMING MODAL FUNCTIONS ====================
+function drawCueFaceCanvas() {
+  const c = document.getElementById('cueFaceCanvas');
+  if (!c) return;
+  const cx = 75, cy = 75, r = 66, dotR = 11;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  c.width = 150 * dpr; c.height = 150 * dpr;
+  c.style.width = '150px'; c.style.height = '150px';
+  const cctx = c.getContext('2d');
+  cctx.setTransform(1, 0, 0, 1, 0, 0);
+  cctx.scale(dpr, dpr);
+  cctx.clearRect(0, 0, 150, 150);
+
+  // Ball face
+  const grad = cctx.createRadialGradient(cx - r * 0.15, cy - r * 0.2, r * 0.05, cx, cy, r);
+  grad.addColorStop(0, '#fafaf5'); grad.addColorStop(0.6, '#dddcd0'); grad.addColorStop(1, '#999');
+  cctx.fillStyle = grad;
+  cctx.beginPath(); cctx.arc(cx, cy, r, 0, Math.PI * 2); cctx.fill();
+
+  // Crosshair
+  cctx.strokeStyle = 'rgba(0,0,0,0.07)'; cctx.lineWidth = 1;
+  cctx.setLineDash([3, 5]);
+  cctx.beginPath(); cctx.moveTo(cx - r + 12, cy); cctx.lineTo(cx + r - 12, cy); cctx.stroke();
+  cctx.beginPath(); cctx.moveTo(cx, cy - r + 12); cctx.lineTo(cx, cy + r - 12); cctx.stroke();
+  cctx.setLineDash([]);
+
+  // Hit point
+  const maxOff = r * 0.62;
+  let hdx = (cueFaceHitX - 0.5) * 2 * maxOff, hdy = (cueFaceHitY - 0.5) * 2 * maxOff;
+  const hd = Math.sqrt(hdx * hdx + hdy * hdy);
+  if (hd > maxOff) { const s = maxOff / hd; hdx *= s; hdy *= s; }
+  const hpx = cx + hdx, hpy = cy + hdy;
+
+  const hg = cctx.createRadialGradient(hpx - 2, hpy - 2, 1, hpx, hpy, dotR);
+  hg.addColorStop(0, '#fff'); hg.addColorStop(0.4, '#e94560'); hg.addColorStop(1, '#8b1a2b');
+  cctx.fillStyle = hg;
+  cctx.beginPath(); cctx.arc(hpx, hpy, dotR, 0, Math.PI * 2); cctx.fill();
+  cctx.strokeStyle = 'rgba(255,255,255,0.6)'; cctx.lineWidth = 2;
+  cctx.beginPath(); cctx.arc(hpx, hpy, dotR + 2, 0, Math.PI * 2); cctx.stroke();
+}
+
+function setupCueFaceCanvas() {
+  const c = document.getElementById('cueFaceCanvas');
+  if (!c) return;
+  const getHit = (e) => {
+    const rect = c.getBoundingClientRect();
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const r = 66, maxOff = r * 0.62;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const px = clientX - rect.left - cx, py = clientY - rect.top - cy;
+    const dist = Math.sqrt(px * px + py * py);
+    const clamped = Math.min(dist, maxOff);
+    const scale = dist > 0.01 ? clamped / dist : 1;
+    return {
+      x: Math.max(0, Math.min(1, 0.5 + (px * scale) / (2 * maxOff))),
+      y: Math.max(0, Math.min(1, 0.5 + (py * scale) / (2 * maxOff)))
+    };
+  };
+  c.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); isDraggingCueFace = true;
+    const hit = getHit(e); cueFaceHitX = hit.x; cueFaceHitY = hit.y;
+    syncCueFromFace(); drawCueFaceCanvas();
+  });
+  c.addEventListener('pointermove', (e) => {
+    if (!isDraggingCueFace) return; e.preventDefault();
+    const hit = getHit(e); cueFaceHitX = hit.x; cueFaceHitY = hit.y;
+    syncCueFromFace(); drawCueFaceCanvas();
+  });
+  window.addEventListener('pointerup', () => { isDraggingCueFace = false; });
+}
+
+function syncCueFromFace() {
+  if (cueFaceHitY < 0.33) cueHeight = 'high';
+  else if (cueFaceHitY > 0.67) cueHeight = 'low';
+  else cueHeight = 'mid';
+  if (cueFaceHitX < 0.35) cueSpin = 'left';
+  else if (cueFaceHitX > 0.65) cueSpin = 'right';
+  else cueSpin = 'none';
+  syncAllCueControls();
+}
+
+function syncFaceFromCue() {
+  if (cueHeight === 'high') cueFaceHitY = 0.12;
+  else if (cueHeight === 'low') cueFaceHitY = 0.88;
+  else cueFaceHitY = 0.5;
+  if (cueSpin === 'left') cueFaceHitX = 0.12;
+  else if (cueSpin === 'right') cueFaceHitX = 0.88;
+  else cueFaceHitX = 0.5;
+}
+
+function syncAllCueControls() {
+  document.querySelectorAll('[data-height]').forEach(b => b.classList.toggle('active', b.dataset.height === cueHeight));
+  document.querySelectorAll('.modal-height-btn').forEach(b => b.classList.toggle('active', b.dataset.height === cueHeight));
+  document.querySelectorAll('[data-spin]').forEach(b => b.classList.toggle('active', b.dataset.spin === cueSpin));
+  document.querySelectorAll('.modal-spin-btn').forEach(b => b.classList.toggle('active', b.dataset.spin === cueSpin));
+  document.getElementById('speedSlider').value = cueSpeed;
+  document.getElementById('speedVal').textContent = cueSpeed;
+  const ms = document.getElementById('modalSpeedSlider');
+  if (ms) { ms.value = cueSpeed; document.getElementById('modalSpeedVal').textContent = cueSpeed + ' m/s'; }
+}
+
+function snapToCushionSegment(pt, cushionName) {
+  const m = POCKET_R + BALL_R;
+  const sm = SIDE_POCKET_R + BALL_R;
+  const hw = TABLE_W / 2;
+  if (cushionName === 'top') {
+    let x = Math.max(m, Math.min(TABLE_W - m, pt.x));
+    if (x > hw - sm && x < hw + sm) x = (x < hw) ? hw - sm : hw + sm;
+    return { x, y: 0 };
+  }
+  if (cushionName === 'bottom') {
+    let x = Math.max(m, Math.min(TABLE_W - m, pt.x));
+    if (x > hw - sm && x < hw + sm) x = (x < hw) ? hw - sm : hw + sm;
+    return { x, y: TABLE_H };
+  }
+  if (cushionName === 'left') {
+    let y = Math.max(m, Math.min(TABLE_H - m, pt.y));
+    return { x: 0, y };
+  }
+  if (cushionName === 'right') {
+    let y = Math.max(m, Math.min(TABLE_H - m, pt.y));
+    return { x: TABLE_W, y };
+  }
+  return pt;
+}
+
+function openAimModal() {
+  if (!calculatedRoutes.length) {
+    calculatedRoutes = calculateKickRoutes();
+    updateInfo();
+  }
+  if (!calculatedRoutes.length) return;
+  aimModalOpen = true;
+  adjustedFirstCushion = null;
+  isDraggingCushionPoint = false;
+  syncFaceFromCue();
+  document.getElementById('aimModal').classList.remove('hidden');
+  document.getElementById('modalSpeedSlider').value = cueSpeed;
+  document.getElementById('modalSpeedVal').textContent = cueSpeed + ' m/s';
+  syncAllCueControls();
+  drawCueFaceCanvas();
+}
+
+function closeAimModal() {
+  aimModalOpen = false;
+  isDraggingCushionPoint = false;
+  document.getElementById('aimModal').classList.add('hidden');
+}
+
+function runSimulationWithAdjustment(route) {
+  if (adjustedFirstCushion && route.cushionPoints.length > 0) {
+    const orig = route.cushionPoints[0];
+    const dx = adjustedFirstCushion.x - orig.x;
+    const dy = adjustedFirstCushion.y - orig.y;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      const adjustedRoute = { ...route };
+      adjustedRoute.cushionPoints = [adjustedFirstCushion, ...route.cushionPoints.slice(1)];
+      runSimulation(adjustedRoute);
+      return;
+    }
+  }
+  runSimulation(route);
 }
 
 function stopSimulation(finalResult) {
@@ -1520,6 +1866,15 @@ function runSimulation(route) {
         pb.y += pb.vy * subDt;
       }
 
+      // 2.5. Clamp positions to table bounds (safety net)
+      for (const pb of physBalls) {
+        if (pb.type === 'obstacle' || pb.pocketed) continue;
+        if (pb.x < BALL_R) { pb.x = BALL_R; pb.vx = Math.abs(pb.vx); }
+        if (pb.x > TABLE_W - BALL_R) { pb.x = TABLE_W - BALL_R; pb.vx = -Math.abs(pb.vx); }
+        if (pb.y < BALL_R) { pb.y = BALL_R; pb.vy = Math.abs(pb.vy); }
+        if (pb.y > TABLE_H - BALL_R) { pb.y = TABLE_H - BALL_R; pb.vy = -Math.abs(pb.vy); }
+      }
+
       // 3. Cushion collisions
       for (const pb of physBalls) {
         if (pb.type === 'obstacle' || pb.pocketed) continue;
@@ -1528,9 +1883,15 @@ function runSimulation(route) {
           const dx = pb.x - cp.x, dy = pb.y - cp.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist >= pb.r) continue;
-          // Normal (cushion → ball)
-          const nx = dist > 0.001 ? dx / dist : 0;
-          const ny = dist > 0.001 ? dy / dist : -1;
+          // Geometric normal (perpendicular to cushion, pointing inward)
+          let nx, ny;
+          if (seg.horiz) {
+            nx = 0;
+            ny = (seg.y1 < TABLE_H / 2) ? 1 : -1;
+          } else {
+            nx = (seg.x1 < TABLE_W / 2) ? 1 : -1;
+            ny = 0;
+          }
           // Push out
           pb.x += nx * (pb.r - dist);
           pb.y += ny * (pb.r - dist);
@@ -1604,7 +1965,7 @@ function runSimulation(route) {
         if (pb.pocketed) continue;
         for (const pp of POCKET_POSITIONS) {
           const d = Math.sqrt((pb.x - pp.x) ** 2 + (pb.y - pp.y) ** 2);
-          if (d < pp.r * 0.75) {
+          if (d < pp.r + BALL_R * 0.5) {
             pb.pocketed = true;
             if (pb.type === 'target') targetPocketed = true;
             if (pb.type === 'cue') cuePocketed = true;
@@ -1739,21 +2100,14 @@ document.getElementById('btnCalc').addEventListener('click', () => {
   updateInfo();
 });
 
-// Simulate button
+// Simulate button - opens aiming modal
 document.getElementById('btnSim').addEventListener('click', () => {
   if (simRunning) {
     stopSimulation();
     document.getElementById('btnSim').textContent = '物理模拟';
     return;
   }
-  if (!calculatedRoutes.length) {
-    calculatedRoutes = calculateKickRoutes();
-    updateInfo();
-  }
-  if (calculatedRoutes.length > 0) {
-    physicsTrails = [];
-    runSimulation(calculatedRoutes[selectedRouteIndex] || calculatedRoutes[0]);
-  }
+  openAimModal();
 });
 
 // Clear button
@@ -1791,6 +2145,52 @@ document.querySelectorAll('[data-spin]').forEach(btn => {
     document.querySelectorAll('[data-spin]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     cueSpin = btn.dataset.spin;
+  });
+});
+
+// ==================== AIMING MODAL WIRING ====================
+setupCueFaceCanvas();
+
+document.getElementById('modalClose').addEventListener('click', closeAimModal);
+document.getElementById('modalCancel').addEventListener('click', closeAimModal);
+
+// Close modal on outside click
+document.getElementById('aimModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeAimModal();
+});
+
+document.getElementById('modalStartSim').addEventListener('click', () => {
+  closeAimModal();
+  if (!calculatedRoutes.length) return;
+  physicsTrails = [];
+  runSimulationWithAdjustment(calculatedRoutes[selectedRouteIndex]);
+});
+
+// Modal speed slider
+document.getElementById('modalSpeedSlider').addEventListener('input', (e) => {
+  cueSpeed = parseFloat(e.target.value);
+  document.getElementById('modalSpeedVal').textContent = cueSpeed + ' m/s';
+  document.getElementById('speedSlider').value = cueSpeed;
+  document.getElementById('speedVal').textContent = cueSpeed;
+});
+
+// Modal cue height buttons
+document.querySelectorAll('.modal-height-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    cueHeight = btn.dataset.height;
+    syncFaceFromCue();
+    syncAllCueControls();
+    drawCueFaceCanvas();
+  });
+});
+
+// Modal spin buttons
+document.querySelectorAll('.modal-spin-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    cueSpin = btn.dataset.spin;
+    syncFaceFromCue();
+    syncAllCueControls();
+    drawCueFaceCanvas();
   });
 });
 
