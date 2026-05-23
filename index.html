@@ -451,7 +451,8 @@ let cueSpin = 'none';  // 'left' | 'none' | 'right'
 // Aiming modal state
 let cueFaceHitX = 0.5, cueFaceHitY = 0.5;
 let aimModalOpen = false;
-let adjustedFirstCushion = null;
+let adjustedCushionPoints = null;  // null or [{x,y},...] adjusted cushion hit points
+let draggingCushionIndex = -1;     // which cushion point is being dragged
 let isDraggingCueFace = false;
 let isDraggingCushionPoint = false;
 
@@ -782,6 +783,14 @@ function drawRoutes() {
     const selected = ri === selectedRouteIndex;
     const s = tableScale;
 
+    // Build display points: use adjusted cushion points for selected route
+    let displayPts = route.points;
+    let displayCushionPts = route.cushionPoints;
+    if (selected && adjustedCushionPoints) {
+      displayCushionPts = adjustedCushionPoints;
+      displayPts = [route.points[0], ...adjustedCushionPoints, route.points[route.points.length - 2], route.points[route.points.length - 1]];
+    }
+
     // Selected route gets glow and thicker line
     if (selected) {
       ctx.strokeStyle = color;
@@ -789,9 +798,9 @@ function drawRoutes() {
       ctx.globalAlpha = 0.3;
       ctx.shadowColor = color;
       ctx.shadowBlur = 10 * s;
-      route.points.forEach((pt, i) => {
+      displayPts.forEach((pt, i) => {
         if (i === 0) return;
-        const prev = toCanvas(route.points[i-1].x, route.points[i-1].y);
+        const prev = toCanvas(displayPts[i-1].x, displayPts[i-1].y);
         const curr = toCanvas(pt.x, pt.y);
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
@@ -806,9 +815,9 @@ function drawRoutes() {
     ctx.lineWidth = selected ? 3.5 : 2;
     ctx.globalAlpha = selected ? 1 : (0.45 + 0.1 * ri);
 
-    route.points.forEach((pt, i) => {
+    displayPts.forEach((pt, i) => {
       if (i === 0) return;
-      const prev = toCanvas(route.points[i-1].x, route.points[i-1].y);
+      const prev = toCanvas(displayPts[i-1].x, displayPts[i-1].y);
       const curr = toCanvas(pt.x, pt.y);
 
       // Dashed for predictive segments, solid for main path
@@ -842,8 +851,8 @@ function drawRoutes() {
     });
     ctx.setLineDash([]);
 
-    // Cushion hit points
-    route.cushionPoints.forEach((cp, ci) => {
+    // Cushion hit points (use display points for selected)
+    displayCushionPts.forEach((cp, ci) => {
       const p = toCanvas(cp.x, cp.y);
       const r = selected ? 7.5 * s : 5.5 * s;
 
@@ -875,26 +884,27 @@ function drawRoutes() {
     ctx.globalAlpha = 1;
   });
 
-  // Draw adjustable first cushion point when modal is open
-  if (aimModalOpen && selectedRouteIndex < calculatedRoutes.length) {
+  // Draw all draggable cushion points with pulse rings
+  if (selectedRouteIndex < calculatedRoutes.length) {
     const route = calculatedRoutes[selectedRouteIndex];
-    const adjPt = adjustedFirstCushion || (route.cushionPoints.length > 0 ? route.cushionPoints[0] : null);
-    if (adjPt) {
-      const p = toCanvas(adjPt.x, adjPt.y);
+    const adjPts = adjustedCushionPoints || route.cushionPoints;
+    adjPts.forEach((cp, ci) => {
+      const p = toCanvas(cp.x, cp.y);
       const r = BALL_R * tableScale * 1.3;
       const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
-      ctx.strokeStyle = `rgba(240, 192, 64, ${0.35 + pulse * 0.35})`;
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = `rgba(240, 192, 64, ${0.3 + pulse * 0.3})`;
+      ctx.lineWidth = 2.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = '#f0c040';
-      ctx.beginPath(); ctx.arc(p.x, p.y, 5 * tableScale, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = `bold ${Math.max(9, 10*tableScale)}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText('拖拽调整', p.x, p.y - r - 4);
-    }
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4 * tableScale, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(9, 10*tableScale)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    const fp = toCanvas(adjPts[0].x, adjPts[0].y);
+    ctx.fillText('拖拽调整', fp.x, fp.y - BALL_R * tableScale * 1.3 - 4);
   }
 }
 
@@ -1094,16 +1104,20 @@ canvas.addEventListener('pointerdown', (e) => {
   const pos = getEventPos(e);
   const log = toLogical(pos.x, pos.y);
 
-  // Cushion drag mode when modal is open
-  if (aimModalOpen && calculatedRoutes.length > 0) {
+  // Cushion drag on any cushion hit point
+  if (calculatedRoutes.length > 0) {
     const route = calculatedRoutes[selectedRouteIndex];
     if (route && route.cushionPoints.length > 0) {
-      const firstCp = adjustedFirstCushion || route.cushionPoints[0];
-      const dx = log.x - firstCp.x, dy = log.y - firstCp.y;
-      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 5) {
-        isDraggingCushionPoint = true;
-        canvas.setPointerCapture(e.pointerId);
-        return;
+      const pts = adjustedCushionPoints || route.cushionPoints;
+      for (let ci = 0; ci < pts.length; ci++) {
+        const dx = log.x - pts[ci].x, dy = log.y - pts[ci].y;
+        if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 5) {
+          draggingCushionIndex = ci;
+          isDraggingCushionPoint = true;
+          if (!adjustedCushionPoints) adjustedCushionPoints = [...route.cushionPoints];
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
       }
     }
   }
@@ -1169,15 +1183,18 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
-  // Cushion drag in modal
-  if (isDraggingCushionPoint && aimModalOpen) {
+  // Cushion drag
+  if (isDraggingCushionPoint) {
     const pos = getEventPos(e);
     const log = toLogical(pos.x, pos.y);
     const route = calculatedRoutes[selectedRouteIndex];
-    if (route && route.cushionPoints.length > 0) {
-      adjustedFirstCushion = snapToCushionSegment(log, route.sequence[0]);
-      document.getElementById('cushionAdjustInfo').textContent =
-        `颗星点: (${adjustedFirstCushion.x.toFixed(0)}, ${adjustedFirstCushion.y.toFixed(0)})`;
+    if (route && draggingCushionIndex >= 0 && draggingCushionIndex < route.sequence.length) {
+      const cushionName = route.sequence[draggingCushionIndex];
+      adjustedCushionPoints[draggingCushionIndex] = snapToCushionSegment(log, cushionName);
+      if (aimModalOpen) {
+        document.getElementById('cushionAdjustInfo').textContent =
+          `颗星点${draggingCushionIndex + 1}: (${adjustedCushionPoints[draggingCushionIndex].x.toFixed(0)}, ${adjustedCushionPoints[draggingCushionIndex].y.toFixed(0)})`;
+      }
     }
     e.preventDefault();
     return;
@@ -1213,7 +1230,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerup', () => {
-  if (isDraggingCushionPoint) { isDraggingCushionPoint = false; return; }
+  if (isDraggingCushionPoint) { isDraggingCushionPoint = false; draggingCushionIndex = -1; return; }
   clearTimeout(longPressTimer);
   longPressTimer = null;
   if (!longPressTriggered) {
@@ -1724,8 +1741,9 @@ function openAimModal() {
   }
   if (!calculatedRoutes.length) return;
   aimModalOpen = true;
-  adjustedFirstCushion = null;
+  adjustedCushionPoints = null;
   isDraggingCushionPoint = false;
+  draggingCushionIndex = -1;
   syncFaceFromCue();
   document.getElementById('aimModal').classList.remove('hidden');
   document.getElementById('modalSpeedSlider').value = cueSpeed;
@@ -1741,13 +1759,15 @@ function closeAimModal() {
 }
 
 function runSimulationWithAdjustment(route) {
-  if (adjustedFirstCushion && route.cushionPoints.length > 0) {
-    const orig = route.cushionPoints[0];
-    const dx = adjustedFirstCushion.x - orig.x;
-    const dy = adjustedFirstCushion.y - orig.y;
-    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-      const adjustedRoute = { ...route };
-      adjustedRoute.cushionPoints = [adjustedFirstCushion, ...route.cushionPoints.slice(1)];
+  if (adjustedCushionPoints && route.cushionPoints.length > 0) {
+    let anyChanged = false;
+    for (let i = 0; i < route.cushionPoints.length; i++) {
+      const dx = adjustedCushionPoints[i].x - route.cushionPoints[i].x;
+      const dy = adjustedCushionPoints[i].y - route.cushionPoints[i].y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { anyChanged = true; break; }
+    }
+    if (anyChanged) {
+      const adjustedRoute = { ...route, cushionPoints: [...adjustedCushionPoints] };
       runSimulation(adjustedRoute);
       return;
     }
