@@ -1160,9 +1160,8 @@ canvas.addEventListener('pointerdown', (e) => {
     if (route && route.cushionPoints.length > 0) {
       const firstCp = route.cushionPoints[0];
       const dx = log.x - firstCp.x, dy = log.y - firstCp.y;
-      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 8) {
+      if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 10) {
         cushionDragStartPos = { x: log.x, y: log.y };
-        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
         e.preventDefault();
         return;
       }
@@ -1774,63 +1773,110 @@ function syncAllCueControls() {
 }
 
 function recalcPathFromFirstCushion(route, newFirstCushion) {
-  // Rebuild mirrored targets from ghost ball (same as calculateKickRoutes)
-  const targetBall = balls.find(b => b.type === 'target');
-  if (!targetBall || !pocketTarget) return null;
+  // Pure reflection — trace natural ball path from adjusted first cushion point
+  const cueBall = balls.find(b => b.type === 'cue');
+  if (!cueBall) return null;
 
-  const dx = targetBall.x - pocketTarget.x;
-  const dy = targetBall.y - pocketTarget.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const ghostX = targetBall.x + (dx / dist) * BALL_R * 2;
-  const ghostY = targetBall.y + (dy / dist) * BALL_R * 2;
+  // Cushion normals (pointing inward to table)
+  function getNormal(idx) {
+    if (idx === 0) return { nx: 0, ny: 1 };   // top
+    if (idx === 1) return { nx: 0, ny: -1 };  // bottom
+    if (idx === 2) return { nx: 1, ny: 0 };   // left
+    return { nx: -1, ny: 0 };                  // right
+  }
 
+  function reflectDir(dx, dy, nx, ny) {
+    const dot = 2 * (dx * nx + dy * ny);
+    return { dx: dx - dot * nx, dy: dy - dot * ny };
+  }
+
+  // Convert table-edge point to ghost-cushion coordinates
   const seqIndices = route.sequence.map(name => CUSHIONS.findIndex(c => c.name === name));
-
-  // Build mirrored targets backward from ghost ball
-  let mx = ghostX, my = ghostY;
-  const mirroredTargets = [{ x: mx, y: my }];
-  for (let i = seqIndices.length - 1; i >= 0; i--) {
-    const gc = GHOST_CUSHIONS[seqIndices[i]];
-    const ref = reflectPoint(mx, my, gc);
-    mx = ref.x; my = ref.y;
-    mirroredTargets.unshift({ x: mx, y: my });
-  }
-
-  // Convert snapped table-edge point to ghost-cushion coordinates
-  const firstCushion = CUSHIONS[seqIndices[0]];
+  const firstIdx = seqIndices[0];
+  const firstCush = CUSHIONS[firstIdx];
   let cx = newFirstCushion.x, cy = newFirstCushion.y;
-  if (firstCushion.horiz) {
-    cy = firstCushion.y1 === 0 ? BALL_R : TABLE_H - BALL_R;
+  if (firstCush.horiz) {
+    cx = newFirstCushion.x;
+    cy = firstCush.y1 === 0 ? BALL_R : TABLE_H - BALL_R;
   } else {
-    cx = firstCushion.x1 === 0 ? BALL_R : TABLE_W - BALL_R;
+    cx = firstCush.x1 === 0 ? BALL_R : TABLE_W - BALL_R;
+    cy = newFirstCushion.y;
   }
 
-  // Trace forward from new first cushion point through remaining cushions
   const newHitPoints = [{ x: cx, y: cy }];
-  const newAllPoints = [
-    { x: route.points[0].x, y: route.points[0].y },
-    { x: cx, y: cy }
-  ];
-  let valid = true;
+  const newAllPoints = [{ x: cueBall.x, y: cueBall.y }, { x: cx, y: cy }];
 
-  for (let i = 1; i < seqIndices.length; i++) {
-    const gc = GHOST_CUSHIONS[seqIndices[i]];
-    const target = mirroredTargets[i];
-    const inter = lineIntersection(cx, cy, target.x, target.y, gc.x1, gc.y1, gc.x2, gc.y2);
-    if (!inter) { valid = false; break; }
-    if (inter.t < 0 || inter.t > 1.05) { valid = false; break; }
-    if (!pointOnCushionSegment(inter, gc)) { valid = false; break; }
-    newHitPoints.push({ x: inter.x, y: inter.y });
-    newAllPoints.push({ x: inter.x, y: inter.y });
-    cx = inter.x; cy = inter.y;
+  // Incoming direction
+  let dirX = cx - cueBall.x, dirY = cy - cueBall.y;
+  const inLen = Math.sqrt(dirX * dirX + dirY * dirY);
+  if (inLen < 0.01) return null;
+  dirX /= inLen; dirY /= inLen;
+
+  // Reflect off first cushion
+  const n0 = getNormal(firstIdx);
+  const r0 = reflectDir(dirX, dirY, n0.nx, n0.ny);
+  dirX = r0.dx; dirY = r0.dy;
+
+  // Table edges for boundary checks
+  const tEdges = [
+    { x1: 0, y1: 0, x2: TABLE_W, y2: 0, horiz: true },
+    { x1: 0, y1: TABLE_H, x2: TABLE_W, y2: TABLE_H, horiz: true },
+    { x1: 0, y1: 0, x2: 0, y2: TABLE_H, horiz: false },
+    { x1: TABLE_W, y1: 0, x2: TABLE_W, y2: TABLE_H, horiz: false },
+  ];
+
+  // Trace reflections
+  const maxBounces = Math.min(seqIndices.length + 2, 6);
+  for (let bounce = 1; bounce <= maxBounces; bounce++) {
+    // Find which ghost cushion the ray hits first (within table bounds)
+    let bestInter = null, bestT = Infinity, bestIdx = -1;
+    for (let ci = 0; ci < GHOST_CUSHIONS.length; ci++) {
+      if (ci === firstIdx && bounce === 1) continue;
+      const gc = GHOST_CUSHIONS[ci];
+      const inter = lineIntersection(cx, cy, cx + dirX * 10000, cy + dirY * 10000,
+        gc.x1, gc.y1, gc.x2, gc.y2);
+      if (!inter || inter.t < 0.005 || inter.t >= bestT) continue;
+      if (!pointOnCushionSegment(inter, gc)) continue;
+      // Verify point is within table bounds
+      if (inter.x < -1 || inter.x > TABLE_W + 1 || inter.y < -1 || inter.y > TABLE_H + 1) continue;
+      bestT = inter.t; bestInter = inter; bestIdx = ci;
+    }
+
+    // Also check table edges as a closer stop
+    let edgeInter = null, edgeT = Infinity;
+    for (const edge of tEdges) {
+      const inter = lineIntersection(cx, cy, cx + dirX * 10000, cy + dirY * 10000,
+        edge.x1, edge.y1, edge.x2, edge.y2);
+      if (!inter || inter.t < 0.005 || inter.t >= edgeT) continue;
+      // Clamp to valid segment range
+      if (edge.horiz && (inter.x < 0 || inter.x > TABLE_W)) continue;
+      if (!edge.horiz && (inter.y < 0 || inter.y > TABLE_H)) continue;
+      edgeT = inter.t; edgeInter = inter;
+    }
+
+    // If edge is closer than cushion, stop at edge
+    if (edgeInter && edgeT < bestT) {
+      newAllPoints.push({ x: edgeInter.x, y: edgeInter.y });
+      break;
+    }
+
+    if (!bestInter) {
+      // Extend to table edge
+      if (edgeInter) newAllPoints.push({ x: edgeInter.x, y: edgeInter.y });
+      break;
+    }
+
+    newHitPoints.push({ x: bestInter.x, y: bestInter.y });
+    newAllPoints.push({ x: bestInter.x, y: bestInter.y });
+    cx = bestInter.x; cy = bestInter.y;
+
+    // Reflect
+    const n = getNormal(bestIdx);
+    const ref = reflectDir(dirX, dirY, n.nx, n.ny);
+    dirX = ref.dx; dirY = ref.dy;
+    seqIndices.push(bestIdx);
   }
 
-  if (!valid) return null;
-
-  newAllPoints.push({ x: ghostX, y: ghostY });
-  newAllPoints.push({ x: pocketTarget.x, y: pocketTarget.y });
-
-  // Calculate total distance
   let totalDist = 0;
   for (let i = 0; i < newAllPoints.length - 1; i++) {
     const ddx = newAllPoints[i+1].x - newAllPoints[i].x;
@@ -1838,12 +1884,16 @@ function recalcPathFromFirstCushion(route, newFirstCushion) {
     totalDist += Math.sqrt(ddx * ddx + ddy * ddy);
   }
 
-  return {
-    points: newAllPoints,
-    cushionPoints: newHitPoints,
-    totalDist,
-    sequence: route.sequence,
-  };
+  // Build sequence from actual hit cushions
+  const actualSeq = newHitPoints.slice(1).map((hp, i) => {
+    for (const c of CUSHIONS) {
+      const dist = c.horiz ? Math.abs(hp.y - c.y1) : Math.abs(hp.x - c.x1);
+      if (dist < BALL_R * 2) return c.name;
+    }
+    return '?';
+  });
+
+  return { points: newAllPoints, cushionPoints: newHitPoints, totalDist, sequence: actualSeq };
 }
 
 function snapToCushionSegment(pt, cushionName) {
