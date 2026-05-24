@@ -903,7 +903,11 @@ function drawRoutes() {
       if (i === 0) return;
       const prev = toCanvas(customRoute.points[i-1].x, customRoute.points[i-1].y);
       const curr = toCanvas(pt.x, pt.y);
-      ctx.setLineDash(i <= customRoute.cushionPoints.length ? [8, 6] : []);
+      // Last segment solid only if it's target→pocket, else all dashed
+      const hasTarget = customRoute.points.length > 3 &&
+        customRoute.points[customRoute.points.length-1].x === pocketTarget?.x &&
+        customRoute.points[customRoute.points.length-1].y === pocketTarget?.y;
+      ctx.setLineDash((i === customRoute.points.length - 1 && hasTarget) ? [] : [8, 6]);
       ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(curr.x, curr.y); ctx.stroke();
       const ang = Math.atan2(curr.y - prev.y, curr.x - prev.x);
       ctx.fillStyle = color;
@@ -1860,8 +1864,36 @@ function recalcPathFromFirstCushion(route, newFirstCushion) {
   ];
 
   // Trace reflections
+  const targetBall = balls.find(b => b.type === 'target');
+  let hitTarget = false;
   const maxBounces = Math.min(seqIndices.length + 2, 6);
   for (let bounce = 1; bounce <= maxBounces; bounce++) {
+    // Check if current ray hits target ball before hitting a cushion
+    if (targetBall && pocketTarget && !hitTarget) {
+      const rayLen = 10000;
+      const rx = cx + dirX * rayLen, ry = cy + dirY * rayLen;
+      const dSq = distToSegmentSq(targetBall.x, targetBall.y, cx, cy, rx, ry);
+      if (dSq < (BALL_R * 2.2) ** 2) {
+        // Find ghost ball position (closest point on ray to target ball)
+        const tdx = rx - cx, tdy = ry - cy;
+        const tLenSq = tdx * tdx + tdy * tdy;
+        let t = ((targetBall.x - cx) * tdx + (targetBall.y - cy) * tdy) / tLenSq;
+        t = Math.max(0, t);
+        const ghostX = cx + tdx * t, ghostY = cy + tdy * t;
+        // Ghost ball should be BALL_R*2 away from target toward the ray
+        const gdx = ghostX - targetBall.x, gdy = ghostY - targetBall.y;
+        const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
+        if (gDist > 0.01) {
+          const gbX = targetBall.x + (gdx / gDist) * BALL_R * 2;
+          const gbY = targetBall.y + (gdy / gDist) * BALL_R * 2;
+          newAllPoints.push({ x: gbX, y: gbY });
+          newAllPoints.push({ x: pocketTarget.x, y: pocketTarget.y });
+          hitTarget = true;
+        }
+        break;
+      }
+    }
+
     // Find which ghost cushion the ray hits first (within table bounds)
     let bestInter = null, bestT = Infinity, bestIdx = -1;
     for (let ci = 0; ci < GHOST_CUSHIONS.length; ci++) {
