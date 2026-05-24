@@ -1145,7 +1145,7 @@ canvas.addEventListener('pointerdown', (e) => {
   const log = toLogical(pos.x, pos.y);
 
   // Cushion drag on first cushion point (main interface, no modal needed)
-  if (calculatedRoutes.length > 0 && selectedType !== 'pocket') {
+  if (calculatedRoutes.length > 0) {
     // If custom route exists, check tap on ORIGINAL first point → reset custom
     if (customRoute && selectedRouteIndex < calculatedRoutes.length) {
       const origCp = calculatedRoutes[selectedRouteIndex].cushionPoints[0];
@@ -1169,7 +1169,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 
   // Check if tapping on a route cushion hit point to select that route
-  if (calculatedRoutes.length > 1 && selectedType !== 'pocket') {
+  if (calculatedRoutes.length > 1) {
     const tapRadius = BALL_R * 3; // generous tap target
     for (let ri = 0; ri < calculatedRoutes.length; ri++) {
       for (const cp of calculatedRoutes[ri].cushionPoints) {
@@ -1228,6 +1228,37 @@ canvas.addEventListener('pointerdown', (e) => {
   addBall(log.x, log.y, selectedType);
 });
 
+// Touch start handler for mobile cushion drag
+canvas.addEventListener('touchstart', (e) => {
+  if (simRunning) return;
+  if (!calculatedRoutes.length) return;
+  if (e.touches.length !== 1) return;
+  const touch = e.touches[0];
+  const pos = getEventPos({ clientX: touch.clientX, clientY: touch.clientY });
+  const log = toLogical(pos.x, pos.y);
+
+  // Reset custom on tap of original first cushion point
+  if (customRoute && selectedRouteIndex < calculatedRoutes.length) {
+    const origCp = calculatedRoutes[selectedRouteIndex].cushionPoints[0];
+    const odx = log.x - origCp.x, ody = log.y - origCp.y;
+    if (Math.sqrt(odx * odx + ody * ody) < BALL_R * 5) {
+      customRoute = null;
+      e.preventDefault();
+      return;
+    }
+  }
+  // Start drag
+  const route = customRoute || calculatedRoutes[selectedRouteIndex];
+  if (route && route.cushionPoints.length > 0) {
+    const firstCp = route.cushionPoints[0];
+    const dx = log.x - firstCp.x, dy = log.y - firstCp.y;
+    if (Math.sqrt(dx * dx + dy * dy) < BALL_R * 10) {
+      cushionDragStartPos = { x: log.x, y: log.y };
+      e.preventDefault();
+    }
+  }
+}, { passive: false });
+
 // ==================== CUSHION DRAG (document-level for reliability) ====================
 function handleCushionDragMove(e) {
   if (!cushionDragStartPos) return;
@@ -1256,6 +1287,9 @@ function handleCushionDragUp(e) {
 
 document.addEventListener('pointermove', handleCushionDragMove, { passive: false });
 document.addEventListener('pointerup', handleCushionDragUp);
+// Touch event fallback for mobile
+document.addEventListener('touchmove', handleCushionDragMove, { passive: false });
+document.addEventListener('touchend', handleCushionDragUp);
 
 canvas.addEventListener('pointermove', (e) => {
   // Cushion drag (canvas-level, works with pointer capture)
