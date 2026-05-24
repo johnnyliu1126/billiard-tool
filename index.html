@@ -1871,25 +1871,26 @@ function recalcPathFromFirstCushion(route, newFirstCushion) {
       const rx = cx + dirX * rayLen, ry = cy + dirY * rayLen;
       const dSq = distToSegmentSq(targetBall.x, targetBall.y, cx, cy, rx, ry);
       if (dSq < (BALL_R * 2.2) ** 2) {
-        // Ghost ball: where cue ball center is at contact
-        const tdx = rx - cx, tdy = ry - cy;
-        const tLenSq = tdx * tdx + tdy * tdy;
-        let t = ((targetBall.x - cx) * tdx + (targetBall.y - cy) * tdy) / tLenSq;
-        t = Math.max(0, t);
-        const ghostX = cx + tdx * t, ghostY = cy + tdy * t;
-        const gdx = ghostX - targetBall.x, gdy = ghostY - targetBall.y;
-        const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
-        if (gDist > 0.01) {
-          const gbX = targetBall.x + (gdx / gDist) * BALL_R * 2;
-          const gbY = targetBall.y + (gdy / gDist) * BALL_R * 2;
-          newAllPoints.push({ x: gbX, y: gbY });
+        // Ghost ball: ray-circle intersection (sphere-sphere contact)
+        // Ray: P = O + t*D, target at C, contact when |P - C| = BALL_R*2
+        const R = BALL_R * 2;
+        const vx = cx - targetBall.x, vy = cy - targetBall.y;
+        const a = dirX * dirX + dirY * dirY; // = 1 (normalized)
+        const b = 2 * (vx * dirX + vy * dirY);
+        const c = vx * vx + vy * vy - R * R;
+        const disc = b * b - 4 * a * c;
+        if (disc >= 0) {
+          const tHit = (-b - Math.sqrt(disc)) / (2 * a);
+          if (tHit > 0.001) {
+            const gbX = cx + dirX * tHit, gbY = cy + dirY * tHit;
+            newAllPoints.push({ x: gbX, y: gbY });
 
-          // Target ball goes away from ghost ball (through target center)
-          const tgtDirX = targetBall.x - gbX;
-          const tgtDirY = targetBall.y - gbY;
-          const tgtLen = Math.sqrt(tgtDirX * tgtDirX + tgtDirY * tgtDirY);
-          const tdx2 = tgtDirX / tgtLen;
-          const tdy2 = tgtDirY / tgtLen;
+            // Target ball away from ghost → through target center
+            const tgtDirX = targetBall.x - gbX;
+            const tgtDirY = targetBall.y - gbY;
+            const tgtLen = Math.sqrt(tgtDirX * tgtDirX + tgtDirY * tgtDirY);
+            const tdx2 = tgtDirX / tgtLen;
+            const tdy2 = tgtDirY / tgtLen;
 
           // Trace target ball from its position to nearest pocket or cushion
           let tgtEnd = null, tgtBestT = Infinity;
@@ -1924,8 +1925,9 @@ function recalcPathFromFirstCushion(route, newFirstCushion) {
           }
           if (tgtEnd) newAllPoints.push({ x: tgtEnd.x, y: tgtEnd.y });
           hitTarget = true;
+          }
         }
-        break;
+        if (hitTarget) break;
       }
     }
 
