@@ -425,50 +425,6 @@ const POCKET_POSITIONS = [
   { x: TABLE_W / 2, y: TABLE_H, r: SIDE_POCKET_R }, // bottom side
 ];
 
-// Pocket lip geometry — angled cushion segments near pocket openings
-// Balls hitting lips bounce off at realistic angles
-const POCKET_LIPS = [
-  // Top-left corner pocket: 45° lip
-  { x1: POCKET_R + BALL_R, y1: 0, x2: 0, y2: POCKET_R + BALL_R, nx: 0, ny: 0, pocketIdx: 0 },
-  // Top-right corner pocket: 45° lip
-  { x1: TABLE_W, y1: POCKET_R + BALL_R, x2: TABLE_W - POCKET_R - BALL_R, y2: 0, nx: 0, ny: 0, pocketIdx: 1 },
-  // Top side pocket: V-shape lips
-  { x1: TABLE_W/2 - SIDE_POCKET_R - BALL_R, y1: 0, x2: TABLE_W/2 - SIDE_POCKET_R*0.3, y2: -SIDE_POCKET_R*0.8, nx: 0, ny: 0, pocketIdx: 2 },
-  { x1: TABLE_W/2 + SIDE_POCKET_R*0.3, y1: -SIDE_POCKET_R*0.8, x2: TABLE_W/2 + SIDE_POCKET_R + BALL_R, y2: 0, nx: 0, ny: 0, pocketIdx: 2 },
-  // Bottom-left corner pocket: 45° lip
-  { x1: 0, y1: TABLE_H - POCKET_R - BALL_R, x2: POCKET_R + BALL_R, y2: TABLE_H, nx: 0, ny: 0, pocketIdx: 3 },
-  // Bottom-right corner pocket: 45° lip
-  { x1: TABLE_W - POCKET_R - BALL_R, y1: TABLE_H, x2: TABLE_W, y2: TABLE_H - POCKET_R - BALL_R, nx: 0, ny: 0, pocketIdx: 4 },
-  // Bottom side pocket: V-shape lips
-  { x1: TABLE_W/2 - SIDE_POCKET_R*0.3, y1: TABLE_H + SIDE_POCKET_R*0.8, x2: TABLE_W/2 - SIDE_POCKET_R - BALL_R, y2: TABLE_H, nx: 0, ny: 0, pocketIdx: 5 },
-  { x1: TABLE_W/2 + SIDE_POCKET_R + BALL_R, y1: TABLE_H, x2: TABLE_W/2 + SIDE_POCKET_R*0.3, y2: TABLE_H + SIDE_POCKET_R*0.8, nx: 0, ny: 0, pocketIdx: 5 },
-];
-// Auto-compute inward-pointing unit normals for each lip
-POCKET_LIPS.forEach(lip => {
-  const ldx = lip.x2 - lip.x1, ldy = lip.y2 - lip.y1;
-  const len = Math.sqrt(ldx * ldx + ldy * ldy);
-  // Two perpendicular candidates
-  const n1x = -ldy / len, n1y = ldx / len;
-  const n2x = ldy / len, n2y = -ldx / len;
-  // Pick the one pointing toward the pocket center
-  const pp = POCKET_POSITIONS[lip.pocketIdx];
-  const mx = (lip.x1 + lip.x2) / 2, my = (lip.y1 + lip.y2) / 2;
-  const toPx = pp.x - mx, toPy = pp.y - my;
-  lip.nx = (n1x * toPx + n1y * toPy > 0) ? n1x : n2x;
-  lip.ny = (n1x * toPx + n1y * toPy > 0) ? n1y : n2y;
-});
-
-// Pocket detection regions — triangular areas past the lip opening
-const POCKET_REGIONS = [
-  // Corner pockets: triangular region bounded by x=0,y=0 and lip line
-  { cx: 0, cy: 0, check: (bx,by) => bx < POCKET_R*0.7 && by < POCKET_R*0.7 },
-  { cx: TABLE_W, cy: 0, check: (bx,by) => bx > TABLE_W - POCKET_R*0.7 && by < POCKET_R*0.7 },
-  { cx: TABLE_W/2, cy: 0, check: (bx,by) => Math.abs(bx - TABLE_W/2) < SIDE_POCKET_R*0.5 && by < SIDE_POCKET_R*0.6 },
-  { cx: 0, cy: TABLE_H, check: (bx,by) => bx < POCKET_R*0.7 && by > TABLE_H - POCKET_R*0.7 },
-  { cx: TABLE_W, cy: TABLE_H, check: (bx,by) => bx > TABLE_W - POCKET_R*0.7 && by > TABLE_H - POCKET_R*0.7 },
-  { cx: TABLE_W/2, cy: TABLE_H, check: (bx,by) => Math.abs(bx - TABLE_W/2) < SIDE_POCKET_R*0.5 && by > TABLE_H - SIDE_POCKET_R*0.6 },
-];
-
 // ==================== STATE ====================
 let balls = [];           // { x, y, type: 'cue'|'target'|'obstacle' }
 let pocketTarget = null;  // { x, y }
@@ -663,28 +619,6 @@ function drawTable() {
     ctx.beginPath();
     ctx.arc(pc.x, pc.y, pr * 0.7, 0, Math.PI * 2);
     ctx.fill();
-  });
-
-  // Pocket lips (angled cushion near pocket openings)
-  POCKET_LIPS.forEach(lip => {
-    const p1 = toCanvas(lip.x1, lip.y1);
-    const p2 = toCanvas(lip.x2, lip.y2);
-    // Lip cushion body
-    ctx.strokeStyle = '#5D3A1A';
-    ctx.lineWidth = 6 * s;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
-    // Lip inner edge (green rubber)
-    ctx.strokeStyle = '#1E8C47';
-    ctx.lineWidth = 2.5 * s;
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
-    ctx.lineCap = 'butt';
   });
 
   // Cushion numbering (diamond system labels)
@@ -1758,10 +1692,6 @@ function buildCushionSegments() {
   add(0, TABLE_H, TABLE_W, TABLE_H, true);
   add(0, 0, 0, TABLE_H, false);
   add(TABLE_W, 0, TABLE_W, TABLE_H, false);
-  // Add pocket lip segments
-  for (const lip of POCKET_LIPS) {
-    segs.push({ x1: lip.x1, y1: lip.y1, x2: lip.x2, y2: lip.y2, horiz: false, nx: lip.nx, ny: lip.ny });
-  }
   return segs;
 }
 
@@ -2263,49 +2193,53 @@ function runSimulation(route) {
         pb.x += pb.vx * subDt;
         pb.y += pb.vy * subDt;
 
-        // Swept collision: check if the ball's path crossed any cushion/lip segment
-        // Uses signed distance: d = (pos - segStart) · normal - BALL_R
-        // Ball crosses when d changes sign
-        let bestT = 1;
+        // Swept collision: check if the ball's path crossed any cushion segment
+        // The ball center moves from (oldX,oldY) to (pb.x,pb.y)
+        // A cushion at y=Y is crossed when the ball center reaches Y ± BALL_R
+        let bestT = 1; // fraction of movement at collision
+        let bestSeg = null;
         let bestNx = 0, bestNy = 0;
 
         for (const seg of CUSHION_SEGMENTS) {
-          let nx, ny;
-          if (seg.nx !== undefined) {
-            nx = seg.nx; ny = seg.ny; // pocket lip: pre-computed normal
+          // Calculate the "inner edge" of the cushion (where ball center should not cross)
+          let edgeCoord, normalX, normalY;
+          if (seg.horiz) {
+            // Horizontal cushion: edge is at seg.y1 offset by BALL_R inward
+            const inward = (seg.y1 < TABLE_H / 2) ? 1 : -1;
+            edgeCoord = seg.y1 + BALL_R * inward;
+            normalX = 0; normalY = inward; // normal points INTO the table
+            // Check if ball crossed this edge
+            const dOld = oldY - edgeCoord;
+            const dNew = pb.y - edgeCoord;
+            if (dOld * dNew >= 0) continue; // same side, no crossing
+            // Check x range
+            const crossT = dOld / (dOld - dNew);
+            const crossX = oldX + (pb.x - oldX) * crossT;
+            if (crossX < seg.x1 - BALL_R || crossX > seg.x2 + BALL_R) continue;
+            if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           } else {
-            // Standard cushion: compute normal from orientation
-            if (seg.horiz) {
-              nx = 0; ny = (seg.y1 < TABLE_H / 2) ? 1 : -1;
-            } else {
-              nx = (seg.x1 < TABLE_W / 2) ? 1 : -1; ny = 0;
-            }
+            // Vertical cushion
+            const inward = (seg.x1 < TABLE_W / 2) ? 1 : -1;
+            edgeCoord = seg.x1 + BALL_R * inward;
+            normalX = inward; normalY = 0; // normal points INTO the table
+            const dOld = oldX - edgeCoord;
+            const dNew = pb.x - edgeCoord;
+            if (dOld * dNew >= 0) continue;
+            const crossT = dOld / (dOld - dNew);
+            const crossY = oldY + (pb.y - oldY) * crossT;
+            if (crossY < seg.y1 - BALL_R || crossY > seg.y2 + BALL_R) continue;
+            if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           }
-          // Signed distance from ball center to the inner edge (at BALL_R from segment)
-          const dOld = (oldX - seg.x1) * nx + (oldY - seg.y1) * ny - BALL_R;
-          const dNew = (pb.x - seg.x1) * nx + (pb.y - seg.y1) * ny - BALL_R;
-          if (dOld * dNew >= 0) continue; // same side, no crossing
-          const crossT = dOld / (dOld - dNew);
-          if (crossT >= bestT) continue;
-          // Check crossing point is within segment bounds (with BALL_R tolerance)
-          const crossX = oldX + (pb.x - oldX) * crossT;
-          const crossY = oldY + (pb.y - oldY) * crossT;
-          const minX = Math.min(seg.x1, seg.x2) - BALL_R;
-          const maxX = Math.max(seg.x1, seg.x2) + BALL_R;
-          const minY = Math.min(seg.y1, seg.y2) - BALL_R;
-          const maxY = Math.max(seg.y1, seg.y2) + BALL_R;
-          if (crossX < minX || crossX > maxX || crossY < minY || crossY > maxY) continue;
-          bestT = crossT;
-          bestNx = nx; bestNy = ny;
         }
 
-        if (bestT < 1) {
-          // Place ball at exact collision point (tiny offset away from surface)
+        if (bestSeg && bestT < 1) {
+          // Place ball at exact collision point (with tiny offset away from cushion)
           pb.x = oldX + (pb.x - oldX) * bestT + bestNx * 0.01;
           pb.y = oldY + (pb.y - oldY) * bestT + bestNy * 0.01;
+
           // Reflect velocity
           const vn = pb.vx * bestNx + pb.vy * bestNy;
-          if (vn < 0) { // moving toward surface
+          if (vn < 0) { // moving toward cushion
             const tx = -bestNy, ty = bestNx;
             const vt = pb.vx * tx + pb.vy * ty;
             const spinV = pb.omega * pb.r * PHYS_SPIN_EFFECT;
@@ -2406,12 +2340,12 @@ function runSimulation(route) {
         }
       }
 
-      // 5. Pocket detection — ball must enter the pocket region past the lip
+      // 5. Pocket detection
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
-        for (let pi = 0; pi < POCKET_REGIONS.length; pi++) {
-          const pr = POCKET_REGIONS[pi];
-          if (pr.check(pb.x, pb.y)) {
+        for (const pp of POCKET_POSITIONS) {
+          const d = Math.sqrt((pb.x - pp.x) ** 2 + (pb.y - pp.y) ** 2);
+          if (d < pp.r + BALL_R * 0.5) {
             pb.pocketed = true;
             if (pb.type === 'target') targetPocketed = true;
             if (pb.type === 'cue') cuePocketed = true;
