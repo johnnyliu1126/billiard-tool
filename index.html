@@ -2180,10 +2180,16 @@ function runSimulation(route) {
         }
       }
 
+      // 1.5. Save old positions for swept collision
+      for (const pb of physBalls) {
+        if (pb.pocketed) continue;
+        pb._ox = pb.x; pb._oy = pb.y;
+      }
+
       // 2. Update positions + swept cushion collision detection
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
-        const oldX = pb.x, oldY = pb.y;
+        const oldX = pb._ox, oldY = pb._oy;
         pb.x += pb.vx * subDt;
         pb.y += pb.vy * subDt;
 
@@ -2255,31 +2261,62 @@ function runSimulation(route) {
         if (pb.y > TABLE_H - margin) { pb.y = TABLE_H - margin; if (pb.vy > 0) pb.vy = -pb.vy * PHYS_CUSHION_E; }
       }
 
-      // 4. Ball-ball collisions
+      // 4. Ball-ball collisions (swept detection)
       for (let i = 0; i < physBalls.length; i++) {
         const a = physBalls[i];
         if (a.pocketed) continue;
         for (let j = i + 1; j < physBalls.length; j++) {
           const b = physBalls[j];
           if (b.pocketed) continue;
+
+          // Swept collision: solve |relPos_old + t*relVel*subDt|² = (r1+r2)²
+          const relX = a._ox - b._ox, relY = a._oy - b._oy;
+          const relVx = (a.vx - b.vx) * subDt, relVy = (a.vy - b.vy) * subDt;
+          const R = a.r + b.r;
+          const A = relVx * relVx + relVy * relVy;
+          const B = 2 * (relX * relVx + relY * relVy);
+          const C = relX * relX + relY * relY - R * R;
+
+          let hitT = -1;
+          if (A < 0.01) {
+            // Balls barely moving relative to each other — check overlap
+            if (C < 0) hitT = 0;
+          } else {
+            const disc = B * B - 4 * A * C;
+            if (disc >= 0) {
+              const t0 = (-B - Math.sqrt(disc)) / (2 * A);
+              if (t0 >= 0 && t0 <= 1) hitT = t0;
+            }
+          }
+          if (hitT < 0) continue;
+
+          // Place both balls at exact collision point using saved old positions
+          if (hitT > 0) {
+            a.x = a._ox + a.vx * subDt * hitT;
+            a.y = a._oy + a.vy * subDt * hitT;
+            b.x = b._ox + b.vx * subDt * hitT;
+            b.y = b._oy + b.vy * subDt * hitT;
+          }
+
           const dx = b.x - a.x, dy = b.y - a.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const minD = a.r + b.r;
-          if (dist >= minD || dist < 0.01) continue;
+          if (dist < 0.01) continue;
           const nx = dx / dist, ny = dy / dist;
-          // Push apart
-          const overlap = (minD - dist) / 2;
+
+          // Separate balls
+          const overlap = (R - dist) / 2;
           a.x -= nx * overlap; a.y -= ny * overlap;
           b.x += nx * overlap; b.y += ny * overlap;
+
           // Relative normal velocity
           const dvn = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
           if (dvn <= 0) continue; // separating
           playBallSound(dvn);
-          // Equal-mass impulse: Δv_normal = dvn * (1+e) / 2
+          // Equal-mass impulse
           const jn = dvn * (1 + PHYS_BALL_E) / 2;
           a.vx -= jn * nx; a.vy -= jn * ny;
           b.vx += jn * nx; b.vy += jn * ny;
-          // Tangential friction at contact
+          // Tangential friction
           const tx = -ny, ty = nx;
           const dvt = (a.vx - b.vx) * tx + (a.vy - b.vy) * ty;
           const jt = dvt * 0.08;
