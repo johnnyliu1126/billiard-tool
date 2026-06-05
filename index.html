@@ -2139,8 +2139,16 @@ function runSimulation(route) {
     if (frameCount >= MAX_FRAMES) { stopSimulation(null); return; }
     frameCount++;
 
-    // --- Sub-stepping for stability ---
-    const subSteps = 4;
+    // --- Adaptive sub-stepping: ensure no ball moves more than BALL_R*0.5 per step ---
+    let maxSpd = 0;
+    for (const pb of physBalls) {
+      if (pb.pocketed) continue;
+      const spd = Math.sqrt(pb.vx * pb.vx + pb.vy * pb.vy);
+      if (spd > maxSpd) maxSpd = spd;
+    }
+    const maxDistPerStep = BALL_R * 0.5;
+    const idealSteps = Math.max(4, Math.ceil((maxSpd * PHYS_DT) / maxDistPerStep));
+    const subSteps = Math.min(idealSteps, 24);
     const subDt = PHYS_DT / subSteps;
     for (let s = 0; s < subSteps; s++) {
       // 1. Apply cloth friction
@@ -2179,16 +2187,7 @@ function runSimulation(route) {
         pb.y += pb.vy * subDt;
       }
 
-      // 2.5. Clamp positions to table bounds (safety net)
-      for (const pb of physBalls) {
-        if (pb.pocketed) continue;
-        if (pb.x < BALL_R) { pb.x = BALL_R; pb.vx = Math.abs(pb.vx); }
-        if (pb.x > TABLE_W - BALL_R) { pb.x = TABLE_W - BALL_R; pb.vx = -Math.abs(pb.vx); }
-        if (pb.y < BALL_R) { pb.y = BALL_R; pb.vy = Math.abs(pb.vy); }
-        if (pb.y > TABLE_H - BALL_R) { pb.y = TABLE_H - BALL_R; pb.vy = -Math.abs(pb.vy); }
-      }
-
-      // 3. Cushion collisions
+      // 3. Cushion collisions (primary collision system)
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
         for (const seg of CUSHION_SEGMENTS) {
@@ -2223,6 +2222,16 @@ function runSimulation(route) {
           playCushionSound(Math.abs(vn));
           break; // one collision per ball per substep
         }
+      }
+
+      // 3.5. Hard boundary clamp (safety net for any ball that escaped cushion segments)
+      for (const pb of physBalls) {
+        if (pb.pocketed) continue;
+        const margin = pb.r;
+        if (pb.x < margin) { pb.x = margin; if (pb.vx < 0) pb.vx = -pb.vx * PHYS_CUSHION_E; }
+        if (pb.x > TABLE_W - margin) { pb.x = TABLE_W - margin; if (pb.vx > 0) pb.vx = -pb.vx * PHYS_CUSHION_E; }
+        if (pb.y < margin) { pb.y = margin; if (pb.vy < 0) pb.vy = -pb.vy * PHYS_CUSHION_E; }
+        if (pb.y > TABLE_H - margin) { pb.y = TABLE_H - margin; if (pb.vy > 0) pb.vy = -pb.vy * PHYS_CUSHION_E; }
       }
 
       // 4. Ball-ball collisions
