@@ -2180,51 +2180,72 @@ function runSimulation(route) {
         }
       }
 
-      // 2. Update positions
+      // 2. Update positions + swept cushion collision detection
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
+        const oldX = pb.x, oldY = pb.y;
         pb.x += pb.vx * subDt;
         pb.y += pb.vy * subDt;
-      }
 
-      // 3. Cushion collisions (primary collision system)
-      for (const pb of physBalls) {
-        if (pb.pocketed) continue;
+        // Swept collision: check if the ball's path crossed any cushion segment
+        // The ball center moves from (oldX,oldY) to (pb.x,pb.y)
+        // A cushion at y=Y is crossed when the ball center reaches Y ± BALL_R
+        let bestT = 1; // fraction of movement at collision
+        let bestSeg = null;
+        let bestNx = 0, bestNy = 0;
+
         for (const seg of CUSHION_SEGMENTS) {
-          const cp = closestPt(pb.x, pb.y, seg.x1, seg.y1, seg.x2, seg.y2);
-          const dx = pb.x - cp.x, dy = pb.y - cp.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist >= pb.r) continue;
-          // Geometric normal (perpendicular to cushion, pointing inward)
-          let nx, ny;
+          // Calculate the "inner edge" of the cushion (where ball center should not cross)
+          let edgeCoord, normalX, normalY;
           if (seg.horiz) {
-            nx = 0;
-            ny = (seg.y1 < TABLE_H / 2) ? 1 : -1;
+            // Horizontal cushion: edge is at seg.y1 offset by BALL_R inward
+            const inward = (seg.y1 < TABLE_H / 2) ? 1 : -1;
+            edgeCoord = seg.y1 + BALL_R * inward;
+            normalX = 0; normalY = inward; // normal points INTO the table
+            // Check if ball crossed this edge
+            const dOld = oldY - edgeCoord;
+            const dNew = pb.y - edgeCoord;
+            if (dOld * dNew >= 0) continue; // same side, no crossing
+            // Check x range
+            const crossT = dOld / (dOld - dNew);
+            const crossX = oldX + (pb.x - oldX) * crossT;
+            if (crossX < seg.x1 - BALL_R || crossX > seg.x2 + BALL_R) continue;
+            if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           } else {
-            nx = (seg.x1 < TABLE_W / 2) ? 1 : -1;
-            ny = 0;
+            // Vertical cushion
+            const inward = (seg.x1 < TABLE_W / 2) ? 1 : -1;
+            edgeCoord = seg.x1 + BALL_R * inward;
+            normalX = inward; normalY = 0; // normal points INTO the table
+            const dOld = oldX - edgeCoord;
+            const dNew = pb.x - edgeCoord;
+            if (dOld * dNew >= 0) continue;
+            const crossT = dOld / (dOld - dNew);
+            const crossY = oldY + (pb.y - oldY) * crossT;
+            if (crossY < seg.y1 - BALL_R || crossY > seg.y2 + BALL_R) continue;
+            if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           }
-          // Push out
-          pb.x += nx * (pb.r - dist);
-          pb.y += ny * (pb.r - dist);
-          // Normal velocity
-          const vn = pb.vx * nx + pb.vy * ny;
-          if (vn >= 0) continue; // moving away, skip
-          // Tangential
-          const tx = -ny, ty = nx;
-          const vt = pb.vx * tx + pb.vy * ty;
-          // Spin effect on tangential rebound (set to 0 for mirror-like reflection)
-          const spinV = pb.omega * pb.r * PHYS_SPIN_EFFECT;
-          pb.vx = -vn * PHYS_CUSHION_E * nx + (vt * PHYS_CUSHION_E + spinV) * tx;
-          pb.vy = -vn * PHYS_CUSHION_E * ny + (vt * PHYS_CUSHION_E + spinV) * ty;
-          // Cushion dampens spin
-          pb.omega *= 0.55;
-          playCushionSound(Math.abs(vn));
-          break; // one collision per ball per substep
+        }
+
+        if (bestSeg && bestT < 1) {
+          // Place ball at exact collision point (with tiny offset away from cushion)
+          pb.x = oldX + (pb.x - oldX) * bestT + bestNx * 0.01;
+          pb.y = oldY + (pb.y - oldY) * bestT + bestNy * 0.01;
+
+          // Reflect velocity
+          const vn = pb.vx * bestNx + pb.vy * bestNy;
+          if (vn < 0) { // moving toward cushion
+            const tx = -bestNy, ty = bestNx;
+            const vt = pb.vx * tx + pb.vy * ty;
+            const spinV = pb.omega * pb.r * PHYS_SPIN_EFFECT;
+            pb.vx = -vn * PHYS_CUSHION_E * bestNx + (vt * PHYS_CUSHION_E + spinV) * tx;
+            pb.vy = -vn * PHYS_CUSHION_E * bestNy + (vt * PHYS_CUSHION_E + spinV) * ty;
+            pb.omega *= 0.55;
+            playCushionSound(Math.abs(vn));
+          }
         }
       }
 
-      // 3.5. Hard boundary clamp (safety net for any ball that escaped cushion segments)
+      // 3. Hard boundary clamp (safety net)
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
         const margin = pb.r;
