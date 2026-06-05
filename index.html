@@ -512,7 +512,11 @@ function toLogical(cx, cy) {
   };
 }
 
-window.addEventListener('resize', resize);
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 80);
+});
 resize();
 
 // ==================== DRAWING ====================
@@ -1070,7 +1074,6 @@ function drawSimOverlay() {
 }
 
 function drawAll() {
-  resize();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawTable();
   drawPhysicsTrails();
@@ -1421,15 +1424,6 @@ function generateCushionSequences(n) {
     for (const idx of indices) {
       // Avoid hitting same cushion twice in a row
       if (seq.length > 0 && idx === seq[seq.length - 1]) continue;
-      // Avoid opposite cushion pairs in succession (unlikely patterns)
-      // top(0)->bottom(1) or bottom(1)->top(0) - allow, it's common
-      // But skip left->right->left or right->left->right (redundant)
-      if (seq.length >= 2) {
-        const last = seq[seq.length - 1];
-        const prev = seq[seq.length - 2];
-        // Skip if same as two-back (e.g., top->bottom->top is fine, left->right->left is not)
-        if (idx === prev && (idx === 2 || idx === 3)) continue;
-      }
       recurse([...seq, idx]);
     }
   }
@@ -1511,9 +1505,16 @@ function calculateKickRoutes() {
     // Then ghost to pocket (target ball path)
     allPoints.push({ x: pocketTarget.x, y: pocketTarget.y });
 
-    // Check obstacle collisions for cue ball path only (up to ghost ball)
+    // Check obstacle collisions for cue ball path (up to ghost ball)
     const cuePath = allPoints.slice(0, allPoints.length - 1);
     if (pathHitsObstacle(cuePath, obstacles, safeDist)) continue;
+
+    // Check obstacle collisions for target ball path (target ball → pocket)
+    const tgtPath = [
+      { x: targetBall.x, y: targetBall.y },
+      { x: pocketTarget.x, y: pocketTarget.y }
+    ];
+    if (pathHitsObstacle(tgtPath, obstacles, safeDist)) continue;
 
     // Calculate quality score
     let totalDist = 0;
@@ -1538,8 +1539,8 @@ function calculateKickRoutes() {
     if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
     // Valid approach: cue ball should arrive from the opposite side of the pocket
-    // Allow up to ~70 degrees off the ideal line
-    if (angleDiff > Math.PI * 0.4) continue;
+    // Allow up to ~50 degrees off the ideal line (tighter filter for realistic shots)
+    if (angleDiff > Math.PI * 0.28) continue;
 
     validRoutes.push({
       points: allPoints,
@@ -2139,12 +2140,12 @@ function runSimulation(route) {
     frameCount++;
 
     // --- Sub-stepping for stability ---
-    const subSteps = 2;
+    const subSteps = 4;
     const subDt = PHYS_DT / subSteps;
     for (let s = 0; s < subSteps; s++) {
       // 1. Apply cloth friction
       for (const pb of physBalls) {
-        if (pb.type === 'obstacle' || pb.pocketed) continue;
+        if (pb.pocketed) continue;
         const spd = Math.sqrt(pb.vx * pb.vx + pb.vy * pb.vy);
         if (spd < 0.5 && Math.abs(pb.omega) < 0.1) {
           pb.vx = 0; pb.vy = 0; pb.omega = 0; continue;
@@ -2173,14 +2174,14 @@ function runSimulation(route) {
 
       // 2. Update positions
       for (const pb of physBalls) {
-        if (pb.type === 'obstacle' || pb.pocketed) continue;
+        if (pb.pocketed) continue;
         pb.x += pb.vx * subDt;
         pb.y += pb.vy * subDt;
       }
 
       // 2.5. Clamp positions to table bounds (safety net)
       for (const pb of physBalls) {
-        if (pb.type === 'obstacle' || pb.pocketed) continue;
+        if (pb.pocketed) continue;
         if (pb.x < BALL_R) { pb.x = BALL_R; pb.vx = Math.abs(pb.vx); }
         if (pb.x > TABLE_W - BALL_R) { pb.x = TABLE_W - BALL_R; pb.vx = -Math.abs(pb.vx); }
         if (pb.y < BALL_R) { pb.y = BALL_R; pb.vy = Math.abs(pb.vy); }
@@ -2189,7 +2190,7 @@ function runSimulation(route) {
 
       // 3. Cushion collisions
       for (const pb of physBalls) {
-        if (pb.type === 'obstacle' || pb.pocketed) continue;
+        if (pb.pocketed) continue;
         for (const seg of CUSHION_SEGMENTS) {
           const cp = closestPt(pb.x, pb.y, seg.x1, seg.y1, seg.x2, seg.y2);
           const dx = pb.x - cp.x, dy = pb.y - cp.y;
@@ -2227,10 +2228,10 @@ function runSimulation(route) {
       // 4. Ball-ball collisions
       for (let i = 0; i < physBalls.length; i++) {
         const a = physBalls[i];
-        if (a.type === 'obstacle' || a.pocketed) continue;
+        if (a.pocketed) continue;
         for (let j = i + 1; j < physBalls.length; j++) {
           const b = physBalls[j];
-          if (b.type === 'obstacle' || b.pocketed) continue;
+          if (b.pocketed) continue;
           const dx = b.x - a.x, dy = b.y - a.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           const minD = a.r + b.r;
@@ -2298,7 +2299,7 @@ function runSimulation(route) {
 
     let allStill = true;
     for (const pb of physBalls) {
-      if (pb.type === 'obstacle' || pb.pocketed) continue;
+      if (pb.pocketed) continue;
       if (Math.abs(pb.vx) > 10 || Math.abs(pb.vy) > 10) { allStill = false; break; }
     }
     if (allStill && frameCount > 120) {
