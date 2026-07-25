@@ -319,6 +319,7 @@
   <button class="btn cushion-btn" data-n="5">5星</button>
   <button class="btn primary" id="btnCalc">计算路线</button>
   <button class="btn simulate" id="btnSim">物理模拟</button>
+  <button class="btn danger" id="btnUndo" disabled style="opacity:0.4">↩ 撤销</button>
   <button class="btn danger" id="btnClear">清空</button>
   <button class="btn sound-toggle" id="btnSound" title="音效">🔊</button>
 </div>
@@ -433,6 +434,7 @@ let cushionCount = 2;
 let calculatedRoutes = [];
 let draggingBall = null;
 let dragOffset = { x: 0, y: 0 };
+let dragStartPos = null; // ball position at drag start (for undo)
 let physicsTrails = [];
 let simRunning = false;
 let simStartTime = 0;
@@ -452,6 +454,46 @@ let isDraggingCueFace = false;
 let isDraggingCushionPoint = false;
 let customRoute = null; // user-dragged custom route
 let cushionDragStartPos = null; // track drag start to distinguish tap vs drag
+
+// Undo history
+const MAX_UNDO = 50;
+let undoStack = [];
+
+function pushUndo() {
+  const snapshot = {
+    balls: balls.map(b => ({ x: b.x, y: b.y, type: b.type })),
+    pocketTarget: pocketTarget ? { x: pocketTarget.x, y: pocketTarget.y } : null,
+    calculatedRoutes: [], // reset routes on undo
+  };
+  undoStack.push(snapshot);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoButton();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const snapshot = undoStack.pop();
+  balls = snapshot.balls;
+  pocketTarget = snapshot.pocketTarget;
+  calculatedRoutes = snapshot.calculatedRoutes;
+  selectedRouteIndex = 0;
+  customRoute = null;
+  hasCalculated = false;
+  simResult = null;
+  stopSimulation();
+  physicsTrails = [];
+  document.getElementById('btnSim').textContent = '物理模拟';
+  updateUndoButton();
+  updateInfo();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById('btnUndo');
+  if (btn) {
+    btn.disabled = undoStack.length === 0;
+    btn.style.opacity = undoStack.length === 0 ? '0.4' : '1';
+  }
+}
 
 // ==================== CANVAS SETUP ====================
 const canvas = document.getElementById('canvas');
@@ -1007,6 +1049,19 @@ function drawDragPreview() {
   const r = BALL_R * s;
   const p = toCanvas(draggingBall.x, draggingBall.y);
 
+  // Long press progress ring (visual feedback for delete)
+  if (longPressTimer) {
+    const elapsed = Date.now() - longPressStartTime;
+    const progress = Math.min(1, elapsed / 600);
+    const arcEnd = -Math.PI / 2 + progress * Math.PI * 2;
+
+    ctx.strokeStyle = `rgba(255, 80, 80, ${0.3 + progress * 0.5})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r + 8, -Math.PI / 2, arcEnd);
+    ctx.stroke();
+  }
+
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
@@ -1033,7 +1088,8 @@ function drawSimOverlay() {
       if (pb.pocketed) return;
       const spd = Math.sqrt(pb.vx*pb.vx + pb.vy*pb.vy).toFixed(0);
       const omega = pb.omega.toFixed(1);
-      ctx.fillText(`${pb.type}: (${pb.x.toFixed(0)},${pb.y.toFixed(0)}) v=${spd} ω=${omega}`, 12, y);
+      const sOmega = (pb.sideOmega || 0).toFixed(1);
+      ctx.fillText(`${pb.type}: (${pb.x.toFixed(0)},${pb.y.toFixed(0)}) v=${spd} ω=${omega} sΩ=${sOmega}`, 12, y);
       y += 16;
     });
     return; // don't show result overlay during sim
@@ -1083,8 +1139,22 @@ function drawAll() {
   drawSimOverlay();
 }
 
-function loop() {
+let lastFrameTime = 0;
+const IDLE_FPS = 4; // frames per second when nothing is animating
+
+function loop(now) {
   drawAll();
+
+  // Idle optimization: throttle to IDLE_FPS when nothing is animating
+  const hasAnimation = simRunning || customRoute || (pocketTarget && selectedType === 'pocket');
+  if (!hasAnimation) {
+    const elapsed = now - lastFrameTime;
+    if (elapsed < 1000 / IDLE_FPS) {
+      requestAnimationFrame(loop);
+      return;
+    }
+  }
+  lastFrameTime = now;
   requestAnimationFrame(loop);
 }
 
@@ -1126,6 +1196,7 @@ function overlapsAnyBall(x, y, excludeIndex) {
 function addBall(x, y, type) {
   if (!isInsideTable(x, y)) return;
   if (overlapsAnyBall(x, y, -1)) return;
+  pushUndo();
   if (type === 'cue') {
     balls = balls.filter(b => b.type !== 'cue');
   }
@@ -1142,6 +1213,7 @@ function addBall(x, y, type) {
 
 let longPressTimer = null;
 let longPressTriggered = false;
+let longPressStartTime = 0;
 
 canvas.addEventListener('pointerdown', (e) => {
   if (simRunning) return;
@@ -1199,6 +1271,7 @@ canvas.addEventListener('pointerdown', (e) => {
       if (d < minDist) { minDist = d; nearest = pp; }
     });
     if (nearest && minDist < POCKET_R * 3) {
+      pushUndo();
       pocketTarget = { x: nearest.x, y: nearest.y };
       calculatedRoutes = [];
       selectedRouteIndex = 0;
@@ -1211,9 +1284,11 @@ canvas.addEventListener('pointerdown', (e) => {
   const found = findBallAt(log.x, log.y);
   if (found) {
     longPressTriggered = false;
+    longPressStartTime = Date.now();
     // Set up long press to delete
     longPressTimer = setTimeout(() => {
       longPressTriggered = true;
+      pushUndo();
       balls.splice(found.index, 1);
       calculatedRoutes = [];
       selectedRouteIndex = 0;
@@ -1224,6 +1299,7 @@ canvas.addEventListener('pointerdown', (e) => {
     draggingBall = found.ball;
     dragOffset.x = found.ball.x - log.x;
     dragOffset.y = found.ball.y - log.y;
+    dragStartPos = { x: found.ball.x, y: found.ball.y };
     canvas.setPointerCapture(e.pointerId);
     return;
   }
@@ -1334,8 +1410,18 @@ canvas.addEventListener('pointerup', () => {
   if (cushionDragStartPos) return;
   clearTimeout(longPressTimer);
   longPressTimer = null;
+  longPressStartTime = 0;
   if (!longPressTriggered) {
+    // Push undo if ball was actually moved
+    if (draggingBall && dragStartPos) {
+      const dx = draggingBall.x - dragStartPos.x;
+      const dy = draggingBall.y - dragStartPos.y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        pushUndo();
+      }
+    }
     draggingBall = null;
+    dragStartPos = null;
   }
 });
 
@@ -1542,17 +1628,21 @@ function calculateKickRoutes() {
     // Allow up to ~50 degrees off the ideal line (tighter filter for realistic shots)
     if (angleDiff > Math.PI * 0.28) continue;
 
+    // Energy-aware effective distance: each bounce loses ~28% energy (restitution 0.72)
+    const effectiveDist = totalDist / Math.pow(PHYS_CUSHION_E, seq.length);
+
     validRoutes.push({
       points: allPoints,
       cushionPoints: hitPoints,
       totalDist,
+      effectiveDist,
       angleDiff,
       sequence: seq.map(i => CUSHIONS[i].name),
     });
   }
 
-  // Sort by distance (shorter is generally easier)
-  validRoutes.sort((a, b) => a.totalDist - b.totalDist);
+  // Sort by energy-aware effective distance (accounts for cushion energy loss)
+  validRoutes.sort((a, b) => a.effectiveDist - b.effectiveDist);
 
   // Return top 5
   return validRoutes.slice(0, 5);
@@ -1568,7 +1658,65 @@ const PHYS_MU_SLIDE = 0.22; // sliding friction coefficient
 const PHYS_MU_ROLL = 0.012; // rolling friction coefficient
 const PHYS_CUSHION_E = 0.72; // cushion restitution (energy retention)
 const PHYS_BALL_E = 0.94; // ball-ball restitution
-const PHYS_SPIN_EFFECT = 0; // spin does not affect cushion rebound (mirror-like reflection)
+
+// Side-spin physics (2.5D model): independent vertical-axis rotation
+const PHYS_SQUIRT_MAX_ANGLE = 0.018; // ~1.0° max aim compensation at full side spin
+const PHYS_SIDE_SPIN_MAX = 60; // rad/s at reference speed 3 m/s
+const PHYS_SIDE_SPIN_DECAY = 2.5; // 1/s, exponential decay rate on cloth
+const PHYS_CUSHION_TANGENTIAL_FRICTION = 0.35; // cushion tangential friction coeff
+const PHYS_CUSHION_SIDE_SPIN_RETENTION = 0.55; // sideOmega retention after bounce
+
+// Cue height effect factors (approximate follow/draw on first ball-ball hit)
+const PHYS_FOLLOW_FACTOR = 1.25; // high cue: cue ball follows forward after impact
+const PHYS_DRAW_FACTOR = -0.45; // low cue: cue ball draws back after impact
+const PHYS_FOLLOW_SPIN_FACTOR = 0.6; // additional omega from follow shot
+const PHYS_MAX_TRAIL_POINTS = 500; // max trail points per ball (memory safety)
+
+// ==================== Side-Spin Physics Functions ====================
+function calcSquirtAngle(spinSign, speed) {
+  // Aim compensation: right spin → positive angle, left spin → negative
+  return spinSign * PHYS_SQUIRT_MAX_ANGLE;
+}
+
+function calcInitialSideOmega(spinSign, speed) {
+  const refSpeed = 3000; // mm/s reference
+  return spinSign * PHYS_SIDE_SPIN_MAX * (speed / refSpeed);
+}
+
+function decaySideOmega(sideOmega, dt) {
+  if (Math.abs(sideOmega) < 0.01) return 0;
+  return sideOmega * Math.exp(-PHYS_SIDE_SPIN_DECAY * dt);
+}
+
+function reflectVelocityWithSideSpin(vx, vy, sideOmega, nx, ny, ballRadius, cushionE) {
+  const vn = vx * nx + vy * ny;
+  // Geometric-only reflection when no side spin (preserves existing behavior)
+  // Mirror: v_mirror = v - 2*(v·n)*n, then scale by e (preserves angle)
+  if (Math.abs(sideOmega) < 0.01) {
+    return {
+      vx: cushionE * (vx - 2 * vn * nx),
+      vy: cushionE * (vy - 2 * vn * ny),
+      sideOmega: 0
+    };
+  }
+  const tx = -ny, ty = nx;
+  const vt = vx * tx + vy * ty;
+  const vnOut = -vn * cushionE;
+  const contactSlipSpeed = vt - sideOmega * ballRadius;
+  const normalImpulse = -(1 + cushionE) * vn;
+  const maxFrictionImpulse = PHYS_CUSHION_TANGENTIAL_FRICTION * normalImpulse;
+  const effectiveMassRatio = 2 / 7;
+  let frictionImpulse = contactSlipSpeed / effectiveMassRatio;
+  if (Math.abs(frictionImpulse) > maxFrictionImpulse) {
+    frictionImpulse = Math.sign(frictionImpulse) * maxFrictionImpulse;
+  }
+  const vtOut = vt - frictionImpulse;
+  const deltaOmega = (5 * frictionImpulse) / (2 * ballRadius);
+  const newSideOmega = (sideOmega + deltaOmega) * PHYS_CUSHION_SIDE_SPIN_RETENTION;
+  const newVx = vnOut * nx + vtOut * tx;
+  const newVy = vnOut * ny + vtOut * ty;
+  return { vx: newVx, vy: newVy, sideOmega: newSideOmega };
+}
 
 // ==================== AUDIO ENGINE ====================
 let audioCtx = null;
@@ -2092,14 +2240,17 @@ function runSimulation(route) {
   const speedMs = cueSpeed * 1000; // m/s → mm/s
   const firstCushion = route.cushionPoints[0];
   let aimAng = Math.atan2(firstCushion.y - route.points[0].y, firstCushion.x - route.points[0].x);
-  if (cueSpin === 'left') aimAng -= 0.05;
-  if (cueSpin === 'right') aimAng += 0.05;
+
+  // Side-spin squirt compensation (replaces fixed ±0.05)
+  const spinSign = cueSpin === 'left' ? -1 : cueSpin === 'right' ? 1 : 0;
+  aimAng += calcSquirtAngle(spinSign, speedMs);
 
   const physBalls = balls.map((b) => {
     const pb = {
       x: b.x, y: b.y,
       vx: 0, vy: 0,
       omega: 0,
+      sideOmega: 0, // vertical-axis rotation (rad/s), for left/right spin
       r: BALL_R,
       type: b.type,
       pocketed: false,
@@ -2108,13 +2259,13 @@ function runSimulation(route) {
     if (b.type === 'cue') {
       pb.vx = Math.cos(aimAng) * speedMs;
       pb.vy = Math.sin(aimAng) * speedMs;
-      // Initial spin: high=topspin(+), low=backspin(-), side=left/right
+      // High/low spin (omega): topspin(+), backspin(-)
       const baseSpin = speedMs / BALL_R; // natural rolling angular velocity
-      if (cueHeight === 'high') pb.omega = baseSpin * 1.5;
+      if (cueHeight === 'high') pb.omega = baseSpin * PHYS_FOLLOW_SPIN_FACTOR;
       else if (cueHeight === 'low') pb.omega = -baseSpin * 1.2;
       else pb.omega = 0; // stun shot (no initial spin)
-      if (cueSpin === 'left') pb.omega -= speedMs / BALL_R * 0.8;
-      if (cueSpin === 'right') pb.omega += speedMs / BALL_R * 0.8;
+      // Side spin (sideOmega): independent vertical-axis rotation
+      pb.sideOmega = calcInitialSideOmega(spinSign, speedMs);
     }
     return pb;
   });
@@ -2151,12 +2302,15 @@ function runSimulation(route) {
     const subSteps = Math.min(idealSteps, 24);
     const subDt = PHYS_DT / subSteps;
     for (let s = 0; s < subSteps; s++) {
-      // 1. Apply cloth friction
+      // 1. Apply cloth friction + sideOmega decay
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
+        // Decay sideOmega independently (vertical-axis rotation on cloth)
+        pb.sideOmega = decaySideOmega(pb.sideOmega, subDt);
+
         const spd = Math.sqrt(pb.vx * pb.vx + pb.vy * pb.vy);
-        if (spd < 0.5 && Math.abs(pb.omega) < 0.1) {
-          pb.vx = 0; pb.vy = 0; pb.omega = 0; continue;
+        if (spd < 0.5 && Math.abs(pb.omega) < 0.1 && Math.abs(pb.sideOmega) < 0.1) {
+          pb.vx = 0; pb.vy = 0; pb.omega = 0; pb.sideOmega = 0; continue;
         }
         // Surface speed at contact point (simplified: ball always tends toward natural roll)
         const surfaceV = spd - Math.abs(pb.omega) * pb.r;
@@ -2237,17 +2391,19 @@ function runSimulation(route) {
           pb.x = oldX + (pb.x - oldX) * bestT + bestNx * 0.01;
           pb.y = oldY + (pb.y - oldY) * bestT + bestNy * 0.01;
 
-          // Reflect velocity
+          // Side-spin-aware cushion reflection
+          const ref = reflectVelocityWithSideSpin(
+            pb.vx, pb.vy, pb.sideOmega, bestNx, bestNy, pb.r, PHYS_CUSHION_E
+          );
+          pb.vx = ref.vx;
+          pb.vy = ref.vy;
+          pb.sideOmega = ref.sideOmega;
+
+          // High/low spin (omega) still loses energy on cushion contact
+          pb.omega *= 0.55;
+
           const vn = pb.vx * bestNx + pb.vy * bestNy;
-          if (vn < 0) { // moving toward cushion
-            const tx = -bestNy, ty = bestNx;
-            const vt = pb.vx * tx + pb.vy * ty;
-            const spinV = pb.omega * pb.r * PHYS_SPIN_EFFECT;
-            pb.vx = -vn * PHYS_CUSHION_E * bestNx + (vt * PHYS_CUSHION_E + spinV) * tx;
-            pb.vy = -vn * PHYS_CUSHION_E * bestNy + (vt * PHYS_CUSHION_E + spinV) * ty;
-            pb.omega *= 0.55;
-            playCushionSound(Math.abs(vn));
-          }
+          playCushionSound(Math.abs(vn) * 0.5); // approximate pre-impact speed
         }
       }
 
@@ -2327,15 +2483,15 @@ function runSimulation(route) {
           a.omega += spinImpulse;
           b.omega -= spinImpulse;
 
-          // High/Low cue effect on first cue→target hit
+          // High/Low cue effect on first cue→target hit (approximate follow/draw)
           if (a.type === 'cue' && b.type === 'target' && !a.cueHitTarget) {
             a.cueHitTarget = true;
-            if (cueHeight === 'high') { a.vx *= 1.25; a.vy *= 1.25; a.omega += speedMs / BALL_R * 0.6; }
-            else if (cueHeight === 'low') { a.vx *= -0.45; a.vy *= -0.45; a.omega = -speedMs / BALL_R * 0.6; }
+            if (cueHeight === 'high') { a.vx *= PHYS_FOLLOW_FACTOR; a.vy *= PHYS_FOLLOW_FACTOR; a.omega += speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
+            else if (cueHeight === 'low') { a.vx *= PHYS_DRAW_FACTOR; a.vy *= PHYS_DRAW_FACTOR; a.omega = -speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
           } else if (b.type === 'cue' && a.type === 'target' && !b.cueHitTarget) {
             b.cueHitTarget = true;
-            if (cueHeight === 'high') { b.vx *= 1.25; b.vy *= 1.25; b.omega += speedMs / BALL_R * 0.6; }
-            else if (cueHeight === 'low') { b.vx *= -0.45; b.vy *= -0.45; b.omega = -speedMs / BALL_R * 0.6; }
+            if (cueHeight === 'high') { b.vx *= PHYS_FOLLOW_FACTOR; b.vy *= PHYS_FOLLOW_FACTOR; b.omega += speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
+            else if (cueHeight === 'low') { b.vx *= PHYS_DRAW_FACTOR; b.vy *= PHYS_DRAW_FACTOR; b.omega = -speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
           }
         }
       }
@@ -2355,8 +2511,11 @@ function runSimulation(route) {
       }
     } // end sub-steps
 
-    // Record trails
+    // Record trails (with point limit for memory safety)
     physBalls.forEach((pb, i) => {
+      if (trailData[i].points.length >= PHYS_MAX_TRAIL_POINTS) {
+        trailData[i].points.splice(0, trailData[i].points.length - PHYS_MAX_TRAIL_POINTS + 100);
+      }
       trailData[i].points.push({ x: pb.x, y: pb.y });
     });
 
@@ -2493,8 +2652,12 @@ document.getElementById('btnSim').addEventListener('click', () => {
   openAimModal();
 });
 
+// Undo button
+document.getElementById('btnUndo').addEventListener('click', undo);
+
 // Clear button
 document.getElementById('btnClear').addEventListener('click', () => {
+  pushUndo();
   stopSimulation();
   balls = [];
   pocketTarget = null;
@@ -2579,18 +2742,20 @@ document.querySelectorAll('.modal-spin-btn').forEach(btn => {
 
 // Initial draw
 updateInfo();
-loop();
+requestAnimationFrame(loop);
 
-// Debug hook
-window.__app = {
-  get balls() { return balls; },
-  get pocketTarget() { return pocketTarget; },
-  get calculatedRoutes() { return calculatedRoutes; },
-  get cushionCount() { return cushionCount; },
-  get simRunning() { return simRunning; },
-  get simBodies() { return simPhysicsBodies ? simPhysicsBodies.map(pb => ({ type: pb.type, x: pb.x, y: pb.y, vx: pb.vx, vy: pb.vy, omega: pb.omega, pocketed: pb.pocketed })) : null; },
-  calculate: () => { calculatedRoutes = calculateKickRoutes(); updateInfo(); return calculatedRoutes; },
-};
+// Debug hook (only exposed when URL has ?debug=1)
+if (new URLSearchParams(window.location.search).has('debug')) {
+  window.__app = {
+    get balls() { return balls; },
+    get pocketTarget() { return pocketTarget; },
+    get calculatedRoutes() { return calculatedRoutes; },
+    get cushionCount() { return cushionCount; },
+    get simRunning() { return simRunning; },
+    get simBodies() { return simPhysicsBodies ? simPhysicsBodies.map(pb => ({ type: pb.type, x: pb.x, y: pb.y, vx: pb.vx, vy: pb.vy, omega: pb.omega, sideOmega: pb.sideOmega, pocketed: pb.pocketed })) : null; },
+    calculate: () => { calculatedRoutes = calculateKickRoutes(); updateInfo(); return calculatedRoutes; },
+  };
+}
 </script>
 </body>
 </html>
