@@ -3,8 +3,9 @@
 // Units: positions in mm, velocities in mm/s, angular velocity in rad/s.
 //
 // Mathematical conventions:
+//   Screen coordinates: x right, y down; positive sideOmega is clockwise on screen.
 //   n = unit normal pointing INTO the table at a cushion contact
-//   t = (-n.y, n.x) — unit tangent (90° counter-clockwise from n)
+//   t = (-n.y, n.x) — unit tangent (90° clockwise on screen from n)
 //   vn = dot(v, n) — normal speed
 //   vt = dot(v, t) — tangential speed
 //   Relative tangential sliding speed at contact: vt - sideOmega * ballRadius
@@ -14,15 +15,23 @@
 
 // ==================== CONFIGURABLE PARAMETERS ====================
 
-/** Maximum squirt angle (radians) at full side spin. The cue ball deflects
- *  laterally relative to the cue line by up to this angle. Typical real-world
- *  values are 0.5°–1.5° (0.009–0.026 rad). We use a slightly larger value for
- *  visible in-simulation effect. */
+/** Maximum squirt angle (radians) at full side spin relative to a fixed cue line.
+ *  This is an uncalibrated model parameter; actual deflection depends on the cue. */
 export const PHYS_SQUIRT_MAX_ANGLE = 0.018; // ~1.0°
+
+// Chinese eight-ball baseline. The 0.83 low-speed value is close to the
+// published effective rail result (~0.818) and the open-source Chinese-eight
+// baseline. Above the 2.5 m/s rigid-cushion range, progressively soften the
+// simplified response instead of extrapolating the low-speed coefficient.
+export const PHYS_CUSHION_E_LOW = 0.83;
+export const PHYS_CUSHION_E_HIGH = 0.76;
+export const PHYS_CUSHION_RIGID_LIMIT = 2500; // mm/s
+export const PHYS_CUSHION_HIGH_SPEED = 8000; // mm/s
 
 /** Maximum initial sideOmega (rad/s) at full side spin. This is the angular
  *  velocity around the vertical (table-normal) axis. Scales with shot speed. */
 export const PHYS_SIDE_SPIN_MAX = 60; // rad/s at reference speed of 3000 mm/s (3 m/s)
+export const PHYS_SIDE_SPIN_LIMIT = 150; // public Chinese-eight engine baseline
 
 /** Side spin decay rate on the cloth (fraction lost per second).
  *  A value of 2.5 means sideOmega halves roughly every 0.28 s of travel. */
@@ -30,30 +39,37 @@ export const PHYS_SIDE_SPIN_DECAY = 2.5; // 1/s
 
 /** Tangential friction coefficient at cushion contact. Controls how much
  *  the relative sliding speed at the contact patch affects the rebound. */
-export const PHYS_CUSHION_TANGENTIAL_FRICTION = 0.35;
+export const PHYS_CUSHION_TANGENTIAL_FRICTION = 0.2;
 
-/** Fraction of sideOmega retained after a cushion bounce.
- *  0.55 means ~45% of side spin is lost on each cushion hit. */
+/** Empirical damping applied to sideOmega after the friction impulse.
+ *  The impulse itself can transfer tangential motion into spin. */
 export const PHYS_CUSHION_SIDE_SPIN_RETENTION = 0.55;
 
 // ==================== PURE FUNCTIONS ====================
 
+export function calcCushionRestitution(speed) {
+  const magnitude = Math.abs(Number.isFinite(speed) ? speed : 0);
+  if (magnitude <= PHYS_CUSHION_RIGID_LIMIT) return PHYS_CUSHION_E_LOW;
+  if (magnitude >= PHYS_CUSHION_HIGH_SPEED) return PHYS_CUSHION_E_HIGH;
+  const ratio = (magnitude - PHYS_CUSHION_RIGID_LIMIT) /
+    (PHYS_CUSHION_HIGH_SPEED - PHYS_CUSHION_RIGID_LIMIT);
+  return PHYS_CUSHION_E_LOW + ratio * (PHYS_CUSHION_E_HIGH - PHYS_CUSHION_E_LOW);
+}
+
 /**
  * Calculate the squirt (deflection) angle for a given side-spin intensity.
  * Positive spinSign = right spin, negative = left spin.
- * Returns the angle in radians to ADD to the aim direction.
- * (Right spin → cue ball squirts left, so compensate by aiming right.)
+ * Returns the actual launch deflection in radians to ADD to a fixed cue direction
+ * in screen coordinates (x right, y down). Right spin squirts left (negative angle).
+ * This is not an aiming compensation; compensating the cue would use the opposite sign.
+ * See https://drdavepoolinfo.com/faq/squirt/straight-shot/ .
  *
  * @param {number} spinSign - Normalized side-spin intensity: -1 (full left) to +1 (full right)
  * @param {number} speed - Shot speed in mm/s (used for reference, not currently scaled)
- * @returns {number} Squirt compensation angle in radians
+ * @returns {number} Actual squirt deflection angle in radians
  */
 export function calcSquirtAngle(spinSign, speed) {
-  // Returns the AIM COMPENSATION angle to add to the cue direction.
-  // Right spin (positive sign) → cue ball squirts left → compensate by aiming right (+).
-  // Left spin (negative sign) → cue ball squirts right → compensate by aiming left (-).
-  // Matches the existing convention: cueSpin 'right' → aimAng += angle.
-  return spinSign * PHYS_SQUIRT_MAX_ANGLE;
+  return -spinSign * PHYS_SQUIRT_MAX_ANGLE;
 }
 
 /**
@@ -64,9 +80,12 @@ export function calcSquirtAngle(spinSign, speed) {
  * @returns {number} Initial sideOmega in rad/s
  */
 export function calcInitialSideOmega(spinSign, speed) {
-  // sideOmega scales with shot speed: faster shot = more spin RPM
+  // A right-of-centre cue impulse has negative r×F in x-right/y-down coordinates.
+  // Hence right english produces negative (counterclockwise on screen) sideOmega.
+  // Its magnitude scales with shot speed.
   const referenceSpeed = 3000; // mm/s (3 m/s)
-  return spinSign * PHYS_SIDE_SPIN_MAX * (speed / referenceSpeed);
+  const raw = -spinSign * PHYS_SIDE_SPIN_MAX * (speed / referenceSpeed);
+  return Math.max(-PHYS_SIDE_SPIN_LIMIT, Math.min(PHYS_SIDE_SPIN_LIMIT, raw));
 }
 
 /**
@@ -101,12 +120,15 @@ export function decaySideOmega(sideOmega, dt) {
  *   New normal velocity, tangential velocity, and sideOmega after cushion contact.
  */
 export function calcCushionBounce(vn, vt, sideOmega, ballRadius, cushionRestitution) {
+  // A separating or tangent contact has no collision impulse.
+  if (vn >= 0) return { vnOut: vn, vtOut: vt, sideOmegaOut: sideOmega };
+
   // Normal rebound: standard reflection with restitution
   const vnOut = -vn * cushionRestitution;
 
-  // Per design spec: "零侧旋时，库边反射沿用当前结果，避免影响现有无赛路线"
-  // The original behavior scales the full mirror reflection by e,
-  // preserving the angle of reflection = angle of incidence.
+  // Geometric training approximation retained for the existing no-english routes:
+  // scale both components by e to preserve the mirror angle. This special case
+  // is not a physical zero-spin limit of the friction model below.
   if (Math.abs(sideOmega) < 0.01) {
     return {
       vnOut,
@@ -116,7 +138,7 @@ export function calcCushionBounce(vn, vt, sideOmega, ballRadius, cushionRestitut
   }
 
   // Relative tangential sliding speed at contact patch
-  // Ball surface speed at contact = sideOmega * r (positive t direction)
+  // Contact is at -r*n, so omega×(-r*n) contributes -sideOmega*r along t.
   // Relative sliding = vt - sideOmega * r
   const contactSlipSpeed = vt - sideOmega * ballRadius;
 
@@ -130,11 +152,15 @@ export function calcCushionBounce(vn, vt, sideOmega, ballRadius, cushionRestitut
   // Tangential impulse: try to zero the contact slip speed
   // Effective inertia for tangential direction at contact:
   // For a solid sphere, I = 2/5 m r², so angular contribution to contact
-  // acceleration is (r * tau / I) * r = r² * F / I = 5/2 * F/m
+  // acceleration is r * tau / I = r² * F / I = 5/2 * F/m
   // Combined: a_contact = F/m + (5/2)F/m = (7/2)F/m
-  // So effective mass ratio for tangential impulse is 2/7
+  // So effective mass ratio for tangential impulse is 2/7. Multiply slip by
+  // this ratio: vt' = vt-j and omega' = omega+5j/(2r) give s' = s-(7/2)j.
+  // The inertia, opposing friction and contact velocity relations are consistent
+  // with Mathavan et al. (2010), sections 2.1–2.3, reduced to an equatorial 2D contact:
+  // https://drdavepoolinfo.com/physics_articles/Mathavan_IMechE_2010.pdf
   const effectiveMassRatio = 2 / 7;
-  let frictionImpulse = contactSlipSpeed / effectiveMassRatio;
+  let frictionImpulse = contactSlipSpeed * effectiveMassRatio;
 
   // Clamp to maximum (friction cannot exceed mu * normal_force)
   const absFriction = Math.abs(frictionImpulse);
@@ -152,7 +178,8 @@ export function calcCushionBounce(vn, vt, sideOmega, ballRadius, cushionRestitut
   const deltaOmega = (5 * frictionImpulse) / (2 * ballRadius);
   const sideOmegaOut = sideOmega + deltaOmega;
 
-  // Apply side spin retention (energy loss in spin on cushion contact)
+  // Additional empirical spin damping, separate from the impulse above.
+  // It reduces energy but is not a resolved model of cushion deformation/contact height.
   const finalSideOmega = sideOmegaOut * PHYS_CUSHION_SIDE_SPIN_RETENTION;
 
   return {
