@@ -58,6 +58,7 @@
   .btn.ball-target { min-width: 42px; text-align: center; }
   .btn.ball-obstacle { min-width: 42px; text-align: center; }
   .btn.ball-pocket { min-width: 42px; text-align: center; }
+  .btn.photo-btn { border-color: rgba(69,214,162,.35); color: #83e8c2; }
   .canvas-wrap {
     flex: 1;
     display: flex;
@@ -288,6 +289,32 @@
     background: #2e7d32; border-color: #2e7d32; color: #fff;
     font-weight: 600; padding: 8px 20px; font-size: 14px;
   }
+  .photo-modal-content { max-width: 680px; }
+  .photo-guide {
+    color: #9fb0c4; font-size: 11px; line-height: 1.55;
+    background: rgba(69,214,162,.07); border: 1px solid rgba(69,214,162,.14);
+    padding: 9px 11px; border-radius: 10px;
+  }
+  .photo-preview-wrap {
+    position: relative; overflow: hidden; border-radius: 12px; min-height: 130px;
+    display: grid; place-items: center; background: #08121a;
+    border: 1px solid rgba(255,255,255,.1);
+  }
+  #photoPreviewCanvas { width: 100%; height: auto; }
+  .photo-loading { position: absolute; color: #aebdce; font-size: 12px; }
+  .photo-status { color: #aebdce; font-size: 11px; line-height: 1.55; min-height: 34px; }
+  .photo-status.error { color: #ff929f; }
+  .photo-status.success { color: #83e8c2; }
+  .photo-target-label { color: #77869a; font-size: 10px; }
+  .photo-targets { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
+  .photo-targets::-webkit-scrollbar { display: none; }
+  .photo-target-chip {
+    min-width: 62px; min-height: 34px; padding: 5px 9px; border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05);
+    color: #b8c2d3; font-size: 11px; white-space: nowrap; cursor: pointer;
+  }
+  .photo-target-chip.active { border-color: #45d6a2; color: #fff; background: rgba(69,214,162,.14); }
+  .photo-target-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
 
   /* Polished mobile layout */
   body {
@@ -307,7 +334,7 @@
   .brand span { color: #718096; font-size: 10px; }
   .toolbar > .label { display: none; }
   .toolbar .section {
-    width: min(100%, 460px); display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;
+    width: min(100%, 570px); display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px;
   }
   .btn {
     min-height: 38px; border-color: rgba(255,255,255,.14);
@@ -362,7 +389,7 @@
   @media (min-width: 700px) {
     .toolbar { flex-wrap: nowrap; justify-content: space-between; }
     .brand { width: auto; justify-content: flex-start; }
-    .toolbar .section { width: 440px; }
+    .toolbar .section { width: 570px; }
     .bottom-bar { display: flex; }
     .bottom-bar > .label { display: inline; }
   }
@@ -389,6 +416,7 @@
     <button class="btn ball-target" data-type="target">🔵 目标</button>
     <button class="btn ball-obstacle" data-type="obstacle">🔴 障碍</button>
     <button class="btn ball-pocket" data-type="pocket">⭕ 袋口</button>
+    <button class="btn photo-btn" id="btnPhoto" type="button">📷 拍照</button>
   </div>
 </div>
 
@@ -491,6 +519,33 @@
   </div>
 </div>
 
+<!-- Photo recognition modal -->
+<input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+<div id="photoModal" class="modal-overlay hidden">
+  <div class="modal-content photo-modal-content">
+    <div class="modal-header">
+      <span>📷 照片识别球位</span>
+      <button class="modal-close" id="photoClose" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="photo-guide">尽量从球桌正上方拍摄，让整块台呢和四个角完整入镜，并避开强反光。照片只在当前浏览器内处理，不会上传。</div>
+      <div class="photo-preview-wrap">
+        <canvas id="photoPreviewCanvas" width="760" height="380"></canvas>
+        <div class="photo-loading" id="photoLoading">正在识别台面和球位…</div>
+      </div>
+      <div class="photo-status" id="photoStatus"></div>
+      <div id="photoTargetSection" hidden>
+        <div class="photo-target-label">目标球（不确定花色时可手动指定）</div>
+        <div class="photo-targets" id="photoTargets"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn danger" id="photoRetake">重新拍摄</button>
+      <button class="btn primary" id="photoApply" disabled>应用并计算</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import {
   TABLE_W, TABLE_H, BALL_R, POCKET_R, SIDE_POCKET_R,
@@ -503,6 +558,7 @@ import {
   decaySideOmega, reflectVelocityWithSideSpin,
 } from './side-spin-physics.mjs';
 import { applyClothFriction } from './cloth-physics.mjs';
+import { analyzeTablePhoto, findBestPhotoRoute } from './photo-detection.mjs';
 
 // ==================== STATE ====================
 let balls = [];           // { x, y, type: 'cue'|'target'|'obstacle' }
@@ -523,6 +579,11 @@ let simResult = null;  // { targetPocketed: bool, cueScratched: bool }
 let cueSpeed = 3;      // m/s, default 3
 let cueHeight = 'mid'; // 'high' | 'mid' | 'low'
 let cueSpin = 'none';  // 'left' | 'none' | 'right'
+
+// Photo recognition state
+let photoAnalysis = null;
+let photoTargetIndex = null; // null means automatically choose the best geometric target
+let photoSolution = null;
 
 // Aiming modal state
 let cueFaceHitX = 0.5, cueFaceHitY = 0.5;
@@ -2354,6 +2415,194 @@ function runSimulation(route) {
   simFrameId = requestAnimationFrame(animateSimulation);
 }
 
+// ==================== PHOTO RECOGNITION ====================
+const photoInput = document.getElementById('photoInput');
+const photoModal = document.getElementById('photoModal');
+const photoPreviewCanvas = document.getElementById('photoPreviewCanvas');
+const photoPreviewCtx = photoPreviewCanvas.getContext('2d');
+const photoLoading = document.getElementById('photoLoading');
+const photoStatus = document.getElementById('photoStatus');
+const photoApply = document.getElementById('photoApply');
+
+function closePhotoModal() {
+  photoModal.classList.add('hidden');
+}
+
+function requestTablePhoto() {
+  photoInput.value = '';
+  photoInput.click();
+}
+
+function fileToImageData(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      try {
+        const maxSide = 1200;
+        const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * scale));
+        const height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const temp = document.createElement('canvas');
+        temp.width = width; temp.height = height;
+        const tempCtx = temp.getContext('2d', { willReadFrequently: true });
+        tempCtx.drawImage(image, 0, 0, width, height);
+        resolve(tempCtx.getImageData(0, 0, width, height));
+      } catch (error) {
+        reject(error);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('无法读取这张照片')); };
+    image.src = url;
+  });
+}
+
+function drawPhotoPreview() {
+  if (!photoAnalysis) return;
+  const { rectified, balls: detected } = photoAnalysis;
+  photoPreviewCanvas.width = rectified.width;
+  photoPreviewCanvas.height = rectified.height;
+  const pixels = photoPreviewCtx.createImageData(rectified.width, rectified.height);
+  pixels.data.set(rectified.data);
+  photoPreviewCtx.putImageData(pixels, 0, 0);
+
+  const px = x => x / TABLE_W * (rectified.width - 1);
+  const py = y => y / TABLE_H * (rectified.height - 1);
+  if (photoSolution) {
+    const route = photoSolution.routes[0];
+    photoPreviewCtx.save();
+    photoPreviewCtx.strokeStyle = '#ffe168';
+    photoPreviewCtx.lineWidth = Math.max(2, rectified.width / 280);
+    photoPreviewCtx.setLineDash([10, 7]);
+    photoPreviewCtx.beginPath();
+    route.points.forEach((point, index) => index ? photoPreviewCtx.lineTo(px(point.x), py(point.y)) : photoPreviewCtx.moveTo(px(point.x), py(point.y)));
+    photoPreviewCtx.stroke();
+    photoPreviewCtx.strokeStyle = '#79f2c0';
+    photoPreviewCtx.beginPath();
+    photoPreviewCtx.moveTo(px(photoSolution.target.x), py(photoSolution.target.y));
+    photoPreviewCtx.lineTo(px(photoSolution.pocket.x), py(photoSolution.pocket.y));
+    photoPreviewCtx.stroke();
+    photoPreviewCtx.restore();
+  }
+
+  const objects = detected.filter(ball => ball.kind === 'object');
+  for (const ball of detected) {
+    const objectIndex = objects.indexOf(ball);
+    const isTarget = photoSolution?.target === ball || (!photoSolution && photoTargetIndex === objectIndex);
+    const x = px(ball.x), y = py(ball.y);
+    const r = Math.max(8, rectified.width * BALL_R / TABLE_W * 1.35);
+    photoPreviewCtx.beginPath();
+    photoPreviewCtx.arc(x, y, r, 0, Math.PI * 2);
+    photoPreviewCtx.strokeStyle = ball.kind === 'cue' ? '#fff' : isTarget ? '#45d6a2' : '#ff758f';
+    photoPreviewCtx.lineWidth = isTarget ? 5 : 3;
+    photoPreviewCtx.stroke();
+    photoPreviewCtx.fillStyle = 'rgba(5, 12, 20, .76)';
+    photoPreviewCtx.beginPath();
+    photoPreviewCtx.arc(x, y, Math.max(7, r * .62), 0, Math.PI * 2);
+    photoPreviewCtx.fill();
+    photoPreviewCtx.fillStyle = '#fff';
+    photoPreviewCtx.font = `bold ${Math.max(10, Math.round(r * .9))}px sans-serif`;
+    photoPreviewCtx.textAlign = 'center'; photoPreviewCtx.textBaseline = 'middle';
+    photoPreviewCtx.fillText(ball.kind === 'cue' ? '母' : String(objectIndex + 1), x, y + .5);
+  }
+}
+
+function refreshPhotoSolution() {
+  if (!photoAnalysis) return;
+  const cue = photoAnalysis.balls.find(ball => ball.kind === 'cue');
+  const objects = photoAnalysis.balls.filter(ball => ball.kind === 'object');
+  const options = photoTargetIndex === null ? {} : { targetIndex: photoTargetIndex };
+  photoSolution = findBestPhotoRoute(cue, objects, cushionCount, options);
+  document.querySelectorAll('.photo-target-chip').forEach(chip => {
+    const value = chip.dataset.target === 'auto' ? null : Number(chip.dataset.target);
+    chip.classList.toggle('active', value === photoTargetIndex);
+  });
+  const confidence = Math.round(photoAnalysis.confidence * 100);
+  const pocketNames = ['左上角袋', '右上角袋', '上中袋', '左下角袋', '右下角袋', '下中袋'];
+  if (!cue || !objects.length) {
+    photoStatus.className = 'photo-status error';
+    photoStatus.textContent = photoAnalysis.warnings.join('；') || '没有识别到足够的球，请重新拍摄。';
+    photoApply.disabled = true;
+  } else if (photoSolution) {
+    photoStatus.className = 'photo-status success';
+    photoStatus.textContent = `识别到母球和 ${objects.length} 个目标候选 · 可信度 ${confidence}% · 已找到${cushionCount}星路线，目标球 ${photoSolution.targetIndex + 1} → ${pocketNames[photoSolution.pocketIndex]}`;
+    photoApply.disabled = false;
+  } else {
+    photoStatus.className = 'photo-status';
+    photoStatus.textContent = `识别到母球和 ${objects.length} 个目标候选 · 当前球位没有可行的${cushionCount}星路线；仍可应用球位后拖动修正。`;
+    photoApply.disabled = false;
+  }
+  drawPhotoPreview();
+}
+
+function buildPhotoTargetChoices() {
+  const section = document.getElementById('photoTargetSection');
+  const container = document.getElementById('photoTargets');
+  const objects = photoAnalysis?.balls.filter(ball => ball.kind === 'object') || [];
+  section.hidden = objects.length === 0;
+  container.innerHTML = [
+    '<button class="photo-target-chip active" data-target="auto">✨ 自动最佳</button>',
+    ...objects.map((ball, i) => `<button class="photo-target-chip" data-target="${i}"><span class="photo-target-dot" style="background:${ball.color}"></span>球 ${i + 1}</button>`),
+  ].join('');
+  container.querySelectorAll('.photo-target-chip').forEach(chip => chip.addEventListener('click', () => {
+    photoTargetIndex = chip.dataset.target === 'auto' ? null : Number(chip.dataset.target);
+    refreshPhotoSolution();
+  }));
+}
+
+async function analyzePhotoFile(file) {
+  photoModal.classList.remove('hidden');
+  photoLoading.hidden = false;
+  photoStatus.className = 'photo-status';
+  photoStatus.textContent = '正在识别台面四角、校正透视并定位球心…';
+  photoApply.disabled = true;
+  document.getElementById('photoTargetSection').hidden = true;
+  photoPreviewCtx.clearRect(0, 0, photoPreviewCanvas.width, photoPreviewCanvas.height);
+  try {
+    const imageData = await fileToImageData(file);
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    photoAnalysis = analyzeTablePhoto(imageData);
+    photoTargetIndex = null;
+    buildPhotoTargetChoices();
+    refreshPhotoSolution();
+  } catch (error) {
+    photoAnalysis = null; photoSolution = null;
+    photoStatus.className = 'photo-status error';
+    photoStatus.textContent = error?.message || '照片识别失败，请换一个角度重拍。';
+  } finally {
+    photoLoading.hidden = true;
+  }
+}
+
+function applyPhotoLayout() {
+  if (!photoAnalysis) return;
+  const cue = photoAnalysis.balls.find(ball => ball.kind === 'cue');
+  const objects = photoAnalysis.balls.filter(ball => ball.kind === 'object');
+  if (!cue || !objects.length) return;
+  const selectedTarget = photoSolution?.target || objects[photoTargetIndex ?? 0];
+  pushUndo();
+  const clamp = (value, limit) => Math.max(BALL_R, Math.min(limit - BALL_R, value));
+  balls = [
+    { x: clamp(cue.x, TABLE_W), y: clamp(cue.y, TABLE_H), type: 'cue' },
+    ...objects.map(ball => ({
+      x: clamp(ball.x, TABLE_W), y: clamp(ball.y, TABLE_H),
+      type: ball === selectedTarget ? 'target' : 'obstacle',
+    })),
+  ];
+  pocketTarget = photoSolution ? { ...photoSolution.pocket } : null;
+  invalidateLayout();
+  if (pocketTarget) {
+    calculatedRoutes = calculateKickRoutes();
+    hasCalculated = true;
+  }
+  selectedRouteIndex = 0;
+  selectPlacementType('obstacle');
+  updateInfo();
+  closePhotoModal();
+}
+
 // ==================== UI HANDLERS ====================
 function updateInfo() {
   const info = document.getElementById('routeInfo');
@@ -2441,6 +2690,19 @@ function selectPlacementType(type) {
   selectedType = type;
   updateInfo();
 }
+
+// Photo capture and recognition
+document.getElementById('btnPhoto').addEventListener('click', requestTablePhoto);
+document.getElementById('photoRetake').addEventListener('click', requestTablePhoto);
+document.getElementById('photoClose').addEventListener('click', closePhotoModal);
+photoModal.addEventListener('click', event => {
+  if (event.target === event.currentTarget) closePhotoModal();
+});
+photoInput.addEventListener('change', () => {
+  const file = photoInput.files?.[0];
+  if (file) analyzePhotoFile(file);
+});
+photoApply.addEventListener('click', applyPhotoLayout);
 
 // Ball type buttons
 document.querySelectorAll('[data-type]').forEach(btn => {
