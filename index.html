@@ -345,6 +345,20 @@
   .cue-controls input[type="range"] { flex: 1; width: auto; accent-color: #ef476f; }
   .btn-sm { min-height: 30px; }
   .btn-sm.active { border-color: #f2c14e; color: #f2c14e; background: rgba(242,193,78,.12); }
+  .support-footer {
+    flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 12px max(16px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-bottom));
+    background: linear-gradient(120deg, #101f32, #14283b); border-top: 1px solid rgba(255,255,255,.08);
+  }
+  .support-copy { max-width: 250px; }
+  .support-title { margin-bottom: 5px; color: #f2c14e; font-size: 13px; font-weight: 700; }
+  .support-text { color: #aebdce; font-size: 11px; line-height: 1.55; }
+  .support-qr {
+    width: 160px; height: 171px; position: relative; overflow: hidden; flex: 0 0 auto;
+    border-radius: 14px; border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 20px rgba(0,0,0,.26);
+    background: #fff;
+  }
+  .support-qr img { position: absolute; width: 259px; max-width: none; left: -49px; top: -66px; }
   @media (min-width: 700px) {
     .toolbar { flex-wrap: nowrap; justify-content: space-between; }
     .brand { width: auto; justify-content: flex-start; }
@@ -357,6 +371,11 @@
     .toolbar { padding-top: 6px; padding-bottom: 6px; }
     .bottom-bar { padding-top: 6px; padding-bottom: 5px; }
     .route-info { min-height: 26px; padding: 4px 10px; }
+    .support-footer { padding-top: 7px; padding-bottom: 7px; gap: 10px; }
+    .support-copy { max-width: 230px; }
+    .support-qr { width: 112px; height: 120px; border-radius: 10px; }
+    .support-qr img { width: 181px; left: -34px; top: -46px; }
+    .support-title { margin-bottom: 2px; }
   }
 </style>
 </head>
@@ -413,6 +432,16 @@
     <button class="btn-sm" data-spin="right">右</button>
   </div>
 </div>
+
+<footer class="support-footer" aria-label="支持作者">
+  <div class="support-copy">
+    <div class="support-title">☕ 请作者喝杯饮料</div>
+    <div class="support-text">觉得这杆值回票价？欢迎请作者喝杯饮料。每一份支持，都会继续变成更准的路线和更好的体验。谢谢！</div>
+  </div>
+  <div class="support-qr">
+    <img src="assets/wechat-pay.png" alt="微信支付收款码">
+  </div>
+</footer>
 
 <!-- Aiming Modal -->
 <div id="aimModal" class="modal-overlay hidden">
