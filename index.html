@@ -288,11 +288,82 @@
     background: #2e7d32; border-color: #2e7d32; color: #fff;
     font-weight: 600; padding: 8px 20px; font-size: 14px;
   }
+
+  /* Polished mobile layout */
+  body {
+    color: var(--text);
+    background:
+      radial-gradient(circle at 50% 20%, rgba(37, 76, 96, .22), transparent 34%),
+      linear-gradient(180deg, #0c1220 0%, #111827 100%);
+  }
+  .toolbar {
+    padding: max(10px, env(safe-area-inset-top)) 14px 10px;
+    background: rgba(13, 24, 42, .92);
+    border-bottom-color: rgba(255,255,255,.08);
+    backdrop-filter: blur(16px);
+  }
+  .brand { width: 100%; display: flex; align-items: baseline; justify-content: center; gap: 8px; }
+  .brand strong { color: #fff; font-size: 15px; letter-spacing: .08em; }
+  .brand span { color: #718096; font-size: 10px; }
+  .toolbar > .label { display: none; }
+  .toolbar .section {
+    width: min(100%, 460px); display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;
+  }
+  .btn {
+    min-height: 38px; border-color: rgba(255,255,255,.14);
+    background: rgba(255,255,255,.055); color: #b8c2d3;
+  }
+  .btn.active { border-color: #45d6a2; background: rgba(69,214,162,.14); color: #fff; box-shadow: inset 0 0 0 1px rgba(69,214,162,.12); }
+  .canvas-wrap { min-height: 180px; }
+  .route-info {
+    margin: 0 auto; width: min(calc(100% - 24px), 620px); min-height: 32px;
+    display: grid; place-items: center; padding: 7px 12px; border-radius: 10px;
+    background: rgba(255,255,255,.045); color: #a9b5c8; line-height: 1.35;
+  }
+  .route-selector { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding: 6px 12px; scrollbar-width: none; }
+  .route-selector::-webkit-scrollbar { display: none; }
+  .route-chip { min-height: 34px; padding: 5px 11px; background: rgba(255,255,255,.06); }
+  .route-chip.selected { border-color: #45d6a2; box-shadow: 0 0 0 2px rgba(69,214,162,.12); }
+  .bottom-bar {
+    display: grid; grid-template-columns: repeat(5, minmax(42px, 1fr)); gap: 7px;
+    padding: 10px 12px 8px; background: rgba(13,24,42,.96); border-top-color: rgba(255,255,255,.08);
+  }
+  .bottom-bar > .label { grid-column: 1 / -1; text-align: left; color: #718096; font-size: 10px; }
+  .bottom-bar .cushion-btn { padding: 5px 4px; min-height: 34px; }
+  .bottom-bar #btnCalc { grid-column: span 3; }
+  .bottom-bar #btnSim { grid-column: span 2; }
+  .bottom-bar #btnUndo, .bottom-bar #btnClear { grid-column: span 2; }
+  .bottom-bar #btnSound { justify-self: center; }
+  .btn.primary { background: linear-gradient(135deg, #ef476f, #d9365b); border: 0; box-shadow: 0 5px 18px rgba(233,69,96,.2); }
+  .btn.simulate { background: linear-gradient(135deg, #18a875, #0d8b62); border: 0; box-shadow: 0 5px 18px rgba(24,168,117,.18); }
+  .btn:disabled { opacity: .38 !important; cursor: default; box-shadow: none; }
+  .cue-controls {
+    padding: 7px 12px max(9px, env(safe-area-inset-bottom)); gap: 12px;
+    background: rgba(8,17,31,.98); border-top-color: rgba(255,255,255,.06);
+  }
+  .cue-controls .ctrl-group:first-child { flex: 1 1 150px; }
+  .cue-controls input[type="range"] { flex: 1; width: auto; accent-color: #ef476f; }
+  .btn-sm { min-height: 30px; }
+  .btn-sm.active { border-color: #f2c14e; color: #f2c14e; background: rgba(242,193,78,.12); }
+  @media (min-width: 700px) {
+    .toolbar { flex-wrap: nowrap; justify-content: space-between; }
+    .brand { width: auto; justify-content: flex-start; }
+    .toolbar .section { width: 440px; }
+    .bottom-bar { display: flex; }
+    .bottom-bar > .label { display: inline; }
+  }
+  @media (max-height: 700px) {
+    .brand span { display: none; }
+    .toolbar { padding-top: 6px; padding-bottom: 6px; }
+    .bottom-bar { padding-top: 6px; padding-bottom: 5px; }
+    .route-info { min-height: 26px; padding: 4px 10px; }
+  }
 </style>
 </head>
 <body>
 
 <div class="toolbar">
+  <div class="brand"><strong>解球实验室</strong><span>路线规划 · 物理验证</span></div>
   <span class="label">放置:</span>
   <div class="section">
     <button class="btn ball-cue active" data-type="cue">⚪ 母球</button>
@@ -318,7 +389,7 @@
   <button class="btn cushion-btn" data-n="4">4星</button>
   <button class="btn cushion-btn" data-n="5">5星</button>
   <button class="btn primary" id="btnCalc">计算路线</button>
-  <button class="btn simulate" id="btnSim">物理模拟</button>
+  <button class="btn simulate" id="btnSim">模拟验证</button>
   <button class="btn danger" id="btnUndo" disabled style="opacity:0.4">↩ 撤销</button>
   <button class="btn danger" id="btnClear">清空</button>
   <button class="btn sound-toggle" id="btnSound" title="音效">🔊</button>
@@ -391,40 +462,18 @@
   </div>
 </div>
 
-<script>
-// ==================== CONFIGURATION ====================
-const TABLE_W = 2540; // logical table width (long side, mm)
-const TABLE_H = 1270; // logical table height (short side, mm)
-const BALL_R = 28.575; // ball radius in logical units (57.15mm diameter)
-const POCKET_R = 44; // pocket mouth radius
-const SIDE_POCKET_R = 40; // side pocket slightly smaller
-
-// Cushion lines (inner edges of rails)
-// Table-edge cushions (used for drawing and pocket checks)
-const CUSHIONS = [
-  { name: 'top',    x1: 0, y1: 0, x2: TABLE_W, y2: 0, horiz: true },
-  { name: 'bottom', x1: 0, y1: TABLE_H, x2: TABLE_W, y2: TABLE_H, horiz: true },
-  { name: 'left',   x1: 0, y1: 0, x2: 0, y2: TABLE_H, horiz: false },
-  { name: 'right',  x1: TABLE_W, y1: 0, x2: TABLE_W, y2: TABLE_H, horiz: false },
-];
-
-// Ball-center cushions (offset by BALL_R — where the ball center actually reflects)
-const GHOST_CUSHIONS = [
-  { name: 'top',    x1: 0, y1: BALL_R, x2: TABLE_W, y2: BALL_R, horiz: true },
-  { name: 'bottom', x1: 0, y1: TABLE_H - BALL_R, x2: TABLE_W, y2: TABLE_H - BALL_R, horiz: true },
-  { name: 'left',   x1: BALL_R, y1: 0, x2: BALL_R, y2: TABLE_H, horiz: false },
-  { name: 'right',  x1: TABLE_W - BALL_R, y1: 0, x2: TABLE_W - BALL_R, y2: TABLE_H, horiz: false },
-];
-
-// Pocket positions in logical coords
-const POCKET_POSITIONS = [
-  { x: 0, y: 0, r: POCKET_R },                    // top-left corner
-  { x: TABLE_W, y: 0, r: POCKET_R },               // top-right corner
-  { x: TABLE_W / 2, y: 0, r: SIDE_POCKET_R },       // top side (middle of long rail)
-  { x: 0, y: TABLE_H, r: POCKET_R },               // bottom-left corner
-  { x: TABLE_W, y: TABLE_H, r: POCKET_R },          // bottom-right corner
-  { x: TABLE_W / 2, y: TABLE_H, r: SIDE_POCKET_R }, // bottom side
-];
+<script type="module">
+import {
+  TABLE_W, TABLE_H, BALL_R, POCKET_R, SIDE_POCKET_R,
+  CUSHIONS, GHOST_CUSHIONS, POCKET_POSITIONS,
+  lineIntersection, pointOnCushionSegment, isPointInPocketOpening, distToSegmentSq,
+  calculateKickRoutes as solveKickRoutes,
+} from './mirror-method.mjs';
+import {
+  calcSquirtAngle, calcInitialSideOmega, calcCushionRestitution,
+  decaySideOmega, reflectVelocityWithSideSpin,
+} from './side-spin-physics.mjs';
+import { applyClothFriction } from './cloth-physics.mjs';
 
 // ==================== STATE ====================
 let balls = [];           // { x, y, type: 'cue'|'target'|'obstacle' }
@@ -437,7 +486,7 @@ let dragOffset = { x: 0, y: 0 };
 let dragStartPos = null; // ball position at drag start (for undo)
 let physicsTrails = [];
 let simRunning = false;
-let simStartTime = 0;
+let simFrameId = null;
 let simPhysicsBodies = null; // array of { x, y, vx, vy, omega, r, type, pocketed }
 let hasCalculated = false;
 let selectedRouteIndex = 0; // user-selected route for simulation
@@ -459,8 +508,8 @@ let cushionDragStartPos = null; // track drag start to distinguish tap vs drag
 const MAX_UNDO = 50;
 let undoStack = [];
 
-function pushUndo() {
-  const snapshot = {
+function pushUndo(snapshotOverride = null) {
+  const snapshot = snapshotOverride || {
     balls: balls.map(b => ({ x: b.x, y: b.y, type: b.type })),
     pocketTarget: pocketTarget ? { x: pocketTarget.x, y: pocketTarget.y } : null,
     calculatedRoutes: [], // reset routes on undo
@@ -482,7 +531,7 @@ function undo() {
   simResult = null;
   stopSimulation();
   physicsTrails = [];
-  document.getElementById('btnSim').textContent = '物理模拟';
+  document.getElementById('btnSim').textContent = '模拟验证';
   updateUndoButton();
   updateInfo();
 }
@@ -1078,20 +1127,12 @@ function drawSimOverlay() {
   // During simulation: show ball position debug at top-left
   if (simRunning && simPhysicsBodies) {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(6, 6, 180, 56);
+    ctx.fillRect(6, 6, 190, 28);
     ctx.fillStyle = '#fff';
-    ctx.font = '11px monospace';
+    ctx.font = '12px -apple-system, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    let y = 10;
-    simPhysicsBodies.forEach((pb) => {
-      if (pb.pocketed) return;
-      const spd = Math.sqrt(pb.vx*pb.vx + pb.vy*pb.vy).toFixed(0);
-      const omega = pb.omega.toFixed(1);
-      const sOmega = (pb.sideOmega || 0).toFixed(1);
-      ctx.fillText(`${pb.type}: (${pb.x.toFixed(0)},${pb.y.toFixed(0)}) v=${spd} ω=${omega} sΩ=${sOmega}`, 12, y);
-      y += 16;
-    });
+    ctx.fillText('模拟中 · 等待所有球停止', 12, 13);
     return; // don't show result overlay during sim
   }
 
@@ -1105,17 +1146,8 @@ function drawSimOverlay() {
   ctx.fillRect(0, 0, cw, ch);
 
   // Result badge
-  let text, color;
-  if (simResult.targetPocketed) {
-    text = '🎯 进球!';
-    color = '#4CAF50';
-  } else if (simResult.cueScratched) {
-    text = '⚠ 母球落袋';
-    color = '#FF9800';
-  } else {
-    text = '未进球';
-    color = '#f44336';
-  }
+  const text = simulationResultLabel(simResult);
+  const color = simResult.success ? '#4CAF50' : simResult.cueScratched ? '#FF9800' : '#f44336';
 
   ctx.fillStyle = color;
   ctx.font = 'bold 28px -apple-system, "PingFang SC", sans-serif';
@@ -1193,6 +1225,17 @@ function overlapsAnyBall(x, y, excludeIndex) {
   return false;
 }
 
+function invalidateLayout() {
+  stopSimulation();
+  calculatedRoutes = [];
+  customRoute = null;
+  adjustedFirstCushion = null;
+  selectedRouteIndex = 0;
+  hasCalculated = false;
+  physicsTrails = [];
+  simResult = null;
+}
+
 function addBall(x, y, type) {
   if (!isInsideTable(x, y)) return;
   if (overlapsAnyBall(x, y, -1)) return;
@@ -1204,10 +1247,7 @@ function addBall(x, y, type) {
     balls = balls.filter(b => b.type !== 'target');
   }
   balls.push({ x, y, type });
-  calculatedRoutes = [];
-  selectedRouteIndex = 0;
-  hasCalculated = false;
-  simResult = null;
+  invalidateLayout();
   updateInfo();
 }
 
@@ -1273,8 +1313,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (nearest && minDist < POCKET_R * 3) {
       pushUndo();
       pocketTarget = { x: nearest.x, y: nearest.y };
-      calculatedRoutes = [];
-      selectedRouteIndex = 0;
+      invalidateLayout();
       updateInfo();
     }
     return;
@@ -1290,8 +1329,7 @@ canvas.addEventListener('pointerdown', (e) => {
       longPressTriggered = true;
       pushUndo();
       balls.splice(found.index, 1);
-      calculatedRoutes = [];
-      selectedRouteIndex = 0;
+      invalidateLayout();
       draggingBall = null;
       updateInfo();
     }, 600);
@@ -1399,9 +1437,8 @@ canvas.addEventListener('pointermove', (e) => {
   if (!overlapsAnyBall(newX, newY, dragIdx)) {
     draggingBall.x = newX;
     draggingBall.y = newY;
+    invalidateLayout();
   }
-  calculatedRoutes = [];
-  selectedRouteIndex = 0;
   updateInfo();
 });
 
@@ -1417,7 +1454,14 @@ canvas.addEventListener('pointerup', () => {
       const dx = draggingBall.x - dragStartPos.x;
       const dy = draggingBall.y - dragStartPos.y;
       if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-        pushUndo();
+        const movedIndex = balls.indexOf(draggingBall);
+        pushUndo({
+          balls: balls.map((b, i) => i === movedIndex
+            ? { x: dragStartPos.x, y: dragStartPos.y, type: b.type }
+            : { x: b.x, y: b.y, type: b.type }),
+          pocketTarget: pocketTarget ? { ...pocketTarget } : null,
+          calculatedRoutes: [],
+        });
       }
     }
     draggingBall = null;
@@ -1431,221 +1475,12 @@ canvas.addEventListener('pointerleave', () => {
   draggingBall = null;
 });
 
-// ==================== MIRROR METHOD ====================
-function reflectPoint(px, py, cushion) {
-  if (cushion.horiz) {
-    // Reflect across horizontal line y = cushion.y1
-    return { x: px, y: 2 * cushion.y1 - py };
-  } else {
-    // Reflect across vertical line x = cushion.x1
-    return { x: 2 * cushion.x1 - px, y: py };
-  }
-}
-
-function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
-  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-  if (Math.abs(denom) < 1e-10) return null;
-  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
-  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1), t };
-}
-
-function pointOnCushionSegment(pt, cushion) {
-  const margin = POCKET_R; // pocket gap
-  if (cushion.horiz) {
-    // Check if x is within cushion range, excluding pocket gaps
-    // Corner pockets + side pocket
-    const sideX = TABLE_W / 2;
-    const gaps = [
-      { x: 0, r: POCKET_R },         // left corner
-      { x: TABLE_W, r: POCKET_R },   // right corner
-      { x: sideX, r: SIDE_POCKET_R }, // side pocket
-    ];
-    for (const gap of gaps) {
-      if (Math.abs(pt.x - gap.x) < gap.r + BALL_R) return false;
-    }
-    return true;
-  } else {
-    // Short rails - only corner pockets to worry about
-    const gaps = [
-      { y: 0, r: POCKET_R },
-      { y: TABLE_H, r: POCKET_R },
-    ];
-    for (const gap of gaps) {
-      if (Math.abs(pt.y - gap.y) < gap.r + BALL_R) return false;
-    }
-    return true;
-  }
-}
-
-function distToSegmentSq(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return (px - x1) ** 2 + (py - y1) ** 2;
-  let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  const nearX = x1 + t * dx, nearY = y1 + t * dy;
-  return (px - nearX) ** 2 + (py - nearY) ** 2;
-}
-
-function pathHitsObstacle(points, obstacles, safeDist) {
-  for (let i = 0; i < points.length - 1; i++) {
-    const p1 = points[i], p2 = points[i + 1];
-    for (const obs of obstacles) {
-      const d = distToSegmentSq(obs.x, obs.y, p1.x, p1.y, p2.x, p2.y);
-      if (d < safeDist * safeDist) return true;
-    }
-  }
-  return false;
-}
-
-function generateCushionSequences(n) {
-  const indices = [0, 1, 2, 3]; // top, bottom, left, right
-  const result = [];
-
-  function recurse(seq) {
-    if (seq.length === n) {
-      result.push([...seq]);
-      return;
-    }
-    for (const idx of indices) {
-      // Avoid hitting same cushion twice in a row
-      if (seq.length > 0 && idx === seq[seq.length - 1]) continue;
-      recurse([...seq, idx]);
-    }
-  }
-
-  recurse([]);
-  return result;
-}
-
+// The page and the regression tests use the same calculation module.
 function calculateKickRoutes() {
-  const cueBall = balls.find(b => b.type === 'cue');
-  const targetBall = balls.find(b => b.type === 'target');
-  if (!cueBall || !targetBall || !pocketTarget) return [];
-
-  const obstacles = balls.filter(b => b.type === 'obstacle');
-  const safeDist = BALL_R * 2.2;
-
-  // Ghost ball position (where cue ball needs to arrive to pocket target)
-  const dx = targetBall.x - pocketTarget.x;
-  const dy = targetBall.y - pocketTarget.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const ghostX = targetBall.x + (dx / dist) * BALL_R * 2;
-  const ghostY = targetBall.y + (dy / dist) * BALL_R * 2;
-
-  // Also check: from ghost ball to pocket - will target ball actually go in?
-  // Simplified: assume center-to-center line determines pocket direction
-
-  const sequences = generateCushionSequences(cushionCount);
-  const validRoutes = [];
-
-  for (const seq of sequences) {
-    // Build mirrored targets (work backwards from ghost ball)
-    // Mirror ghost across cushions in reverse order
-    let mirrorX = ghostX, mirrorY = ghostY;
-    const mirroredTargets = [{ x: mirrorX, y: mirrorY }];
-
-    for (let i = seq.length - 1; i >= 0; i--) {
-      const gc = GHOST_CUSHIONS[seq[i]]; // use ball-radius offset cushion
-      const ref = reflectPoint(mirrorX, mirrorY, gc);
-      mirrorX = ref.x;
-      mirrorY = ref.y;
-      mirroredTargets.unshift({ x: mirrorX, y: mirrorY });
-    }
-
-    // Now unfold: from cueBall, find intersection with first ghost cushion
-    // Then from that intersection, find next, etc.
-    let currentX = cueBall.x, currentY = cueBall.y;
-    const hitPoints = [];
-    const allPoints = [{ x: currentX, y: currentY }];
-    let valid = true;
-
-    for (let i = 0; i < seq.length; i++) {
-      const gc = GHOST_CUSHIONS[seq[i]]; // ball-center reflection line
-      const target = mirroredTargets[i]; // mirrored target at this level
-
-      // Find intersection of line (current -> target) with cushion c
-      const inter = lineIntersection(
-        currentX, currentY, target.x, target.y,
-        gc.x1, gc.y1, gc.x2, gc.y2
-      );
-
-      if (!inter) { valid = false; break; }
-
-      // Check hit point is on cushion (not in pocket gap)
-      if (!pointOnCushionSegment(inter, gc)) { valid = false; break; }
-
-      // Check direction is correct (we're moving toward the cushion)
-      if (inter.t < 0 || inter.t > 1.05) { valid = false; break; }
-
-      hitPoints.push({ x: inter.x, y: inter.y });
-      allPoints.push({ x: inter.x, y: inter.y });
-      currentX = inter.x;
-      currentY = inter.y;
-    }
-
-    if (!valid) continue;
-
-    // Last segment: from last hit point to ghost ball
-    allPoints.push({ x: ghostX, y: ghostY });
-    // Then ghost to pocket (target ball path)
-    allPoints.push({ x: pocketTarget.x, y: pocketTarget.y });
-
-    // Check obstacle collisions for cue ball path (up to ghost ball)
-    const cuePath = allPoints.slice(0, allPoints.length - 1);
-    if (pathHitsObstacle(cuePath, obstacles, safeDist)) continue;
-
-    // Check obstacle collisions for target ball path (target ball → pocket)
-    const tgtPath = [
-      { x: targetBall.x, y: targetBall.y },
-      { x: pocketTarget.x, y: pocketTarget.y }
-    ];
-    if (pathHitsObstacle(tgtPath, obstacles, safeDist)) continue;
-
-    // Calculate quality score
-    let totalDist = 0;
-    for (let i = 0; i < allPoints.length - 1; i++) {
-      const dx2 = allPoints[i+1].x - allPoints[i].x;
-      const dy2 = allPoints[i+1].y - allPoints[i].y;
-      totalDist += Math.sqrt(dx2 * dx2 + dy2 * dy2);
-    }
-
-    // Check approach angle to ghost ball (should be reasonable)
-    const lastSeg = allPoints[allPoints.length - 3];
-    const ghostSeg = allPoints[allPoints.length - 2];
-    const approachAngle = Math.atan2(
-      ghostSeg.y - lastSeg.y,
-      ghostSeg.x - lastSeg.x
-    );
-    const pocketAngle = Math.atan2(
-      pocketTarget.y - targetBall.y,
-      pocketTarget.x - targetBall.x
-    );
-    let angleDiff = Math.abs(approachAngle - pocketAngle);
-    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-
-    // Valid approach: cue ball should arrive from the opposite side of the pocket
-    // Allow up to ~50 degrees off the ideal line (tighter filter for realistic shots)
-    if (angleDiff > Math.PI * 0.28) continue;
-
-    // Energy-aware effective distance: each bounce loses ~28% energy (restitution 0.72)
-    const effectiveDist = totalDist / Math.pow(PHYS_CUSHION_E, seq.length);
-
-    validRoutes.push({
-      points: allPoints,
-      cushionPoints: hitPoints,
-      totalDist,
-      effectiveDist,
-      angleDiff,
-      sequence: seq.map(i => CUSHIONS[i].name),
-    });
-  }
-
-  // Sort by energy-aware effective distance (accounts for cushion energy loss)
-  validRoutes.sort((a, b) => a.effectiveDist - b.effectiveDist);
-
-  // Return top 5
-  return validRoutes.slice(0, 5);
+  const cue = balls.find(b => b.type === 'cue');
+  const target = balls.find(b => b.type === 'target');
+  if (!cue || !target || !pocketTarget) return [];
+  return solveKickRoutes(cue, target, pocketTarget, balls.filter(b => b.type === 'obstacle'), cushionCount);
 }
 
 // ==================== CUSTOM POOL PHYSICS ENGINE ====================
@@ -1654,69 +1489,12 @@ function calculateKickRoutes() {
 
 const PHYS_DT = 1 / 60; // simulation timestep (seconds)
 const PHYS_G = 9810; // gravity mm/s² (for cloth friction)
-const PHYS_MU_SLIDE = 0.22; // sliding friction coefficient
-const PHYS_MU_ROLL = 0.012; // rolling friction coefficient
-const PHYS_CUSHION_E = 0.72; // cushion restitution (energy retention)
-const PHYS_BALL_E = 0.94; // ball-ball restitution
+const PHYS_MU_SLIDE = 0.20; // pooltool generic pool-ball baseline
+const PHYS_MU_ROLL = 0.01;
+const PHYS_BALL_E = 0.95;
 
 // Side-spin physics (2.5D model): independent vertical-axis rotation
-const PHYS_SQUIRT_MAX_ANGLE = 0.018; // ~1.0° max aim compensation at full side spin
-const PHYS_SIDE_SPIN_MAX = 60; // rad/s at reference speed 3 m/s
-const PHYS_SIDE_SPIN_DECAY = 2.5; // 1/s, exponential decay rate on cloth
-const PHYS_CUSHION_TANGENTIAL_FRICTION = 0.35; // cushion tangential friction coeff
-const PHYS_CUSHION_SIDE_SPIN_RETENTION = 0.55; // sideOmega retention after bounce
-
-// Cue height effect factors (approximate follow/draw on first ball-ball hit)
-const PHYS_FOLLOW_FACTOR = 1.25; // high cue: cue ball follows forward after impact
-const PHYS_DRAW_FACTOR = -0.45; // low cue: cue ball draws back after impact
-const PHYS_FOLLOW_SPIN_FACTOR = 0.6; // additional omega from follow shot
-const PHYS_MAX_TRAIL_POINTS = 500; // max trail points per ball (memory safety)
-
-// ==================== Side-Spin Physics Functions ====================
-function calcSquirtAngle(spinSign, speed) {
-  // Aim compensation: right spin → positive angle, left spin → negative
-  return spinSign * PHYS_SQUIRT_MAX_ANGLE;
-}
-
-function calcInitialSideOmega(spinSign, speed) {
-  const refSpeed = 3000; // mm/s reference
-  return spinSign * PHYS_SIDE_SPIN_MAX * (speed / refSpeed);
-}
-
-function decaySideOmega(sideOmega, dt) {
-  if (Math.abs(sideOmega) < 0.01) return 0;
-  return sideOmega * Math.exp(-PHYS_SIDE_SPIN_DECAY * dt);
-}
-
-function reflectVelocityWithSideSpin(vx, vy, sideOmega, nx, ny, ballRadius, cushionE) {
-  const vn = vx * nx + vy * ny;
-  // Geometric-only reflection when no side spin (preserves existing behavior)
-  // Mirror: v_mirror = v - 2*(v·n)*n, then scale by e (preserves angle)
-  if (Math.abs(sideOmega) < 0.01) {
-    return {
-      vx: cushionE * (vx - 2 * vn * nx),
-      vy: cushionE * (vy - 2 * vn * ny),
-      sideOmega: 0
-    };
-  }
-  const tx = -ny, ty = nx;
-  const vt = vx * tx + vy * ty;
-  const vnOut = -vn * cushionE;
-  const contactSlipSpeed = vt - sideOmega * ballRadius;
-  const normalImpulse = -(1 + cushionE) * vn;
-  const maxFrictionImpulse = PHYS_CUSHION_TANGENTIAL_FRICTION * normalImpulse;
-  const effectiveMassRatio = 2 / 7;
-  let frictionImpulse = contactSlipSpeed / effectiveMassRatio;
-  if (Math.abs(frictionImpulse) > maxFrictionImpulse) {
-    frictionImpulse = Math.sign(frictionImpulse) * maxFrictionImpulse;
-  }
-  const vtOut = vt - frictionImpulse;
-  const deltaOmega = (5 * frictionImpulse) / (2 * ballRadius);
-  const newSideOmega = (sideOmega + deltaOmega) * PHYS_CUSHION_SIDE_SPIN_RETENTION;
-  const newVx = vnOut * nx + vtOut * tx;
-  const newVy = vnOut * ny + vtOut * ty;
-  return { vx: newVx, vy: newVy, sideOmega: newSideOmega };
-}
+const PHYS_MAX_TRAIL_POINTS = 1800; // up to 30 seconds at 60 physics steps/s
 
 // ==================== AUDIO ENGINE ====================
 let audioCtx = null;
@@ -2216,17 +1994,24 @@ function runSimulationWithAdjustment(route) {
   runSimulation(route);
 }
 
+function simulationResultLabel(result) {
+  if (result.cueScratched) return '母球落袋';
+  if (result.timedOut) return '超时，结果未定';
+  if (result.wrongPocket) return '目标球进错袋';
+  return result.success ? '指定袋进球 ✓' : '未进球';
+}
+
 function stopSimulation(finalResult) {
+  if (simFrameId !== null) cancelAnimationFrame(simFrameId);
+  simFrameId = null;
   simRunning = false;
   simPhysicsBodies = null;
   simResult = finalResult || null;
   const btn = document.getElementById('btnSim');
   if (finalResult) {
-    btn.textContent = finalResult.targetPocketed ? '物理模拟 ✓进球' :
-                      finalResult.cueScratched ? '物理模拟 ✗母球落袋' :
-                      '物理模拟 ✗未进';
+    btn.textContent = '再次模拟 · ' + simulationResultLabel(finalResult);
   } else {
-    btn.textContent = '物理模拟';
+    btn.textContent = '模拟验证';
   }
 }
 
@@ -2241,15 +2026,16 @@ function runSimulation(route) {
   const firstCushion = route.cushionPoints[0];
   let aimAng = Math.atan2(firstCushion.y - route.points[0].y, firstCushion.x - route.points[0].x);
 
-  // Side-spin squirt compensation (replaces fixed ±0.05)
-  const spinSign = cueSpin === 'left' ? -1 : cueSpin === 'right' ? 1 : 0;
+  // Actual squirt relative to the cue direction; right tip offset deflects left.
+  const spinSign = (cueFaceHitX - 0.5) * 2;
   aimAng += calcSquirtAngle(spinSign, speedMs);
 
   const physBalls = balls.map((b) => {
     const pb = {
       x: b.x, y: b.y,
       vx: 0, vy: 0,
-      omega: 0,
+      omega: 0, // signed roll diagnostic
+      wx: 0, wy: 0, // horizontal angular velocity vector
       sideOmega: 0, // vertical-axis rotation (rad/s), for left/right spin
       r: BALL_R,
       type: b.type,
@@ -2259,11 +2045,10 @@ function runSimulation(route) {
     if (b.type === 'cue') {
       pb.vx = Math.cos(aimAng) * speedMs;
       pb.vy = Math.sin(aimAng) * speedMs;
-      // High/low spin (omega): topspin(+), backspin(-)
-      const baseSpin = speedMs / BALL_R; // natural rolling angular velocity
-      if (cueHeight === 'high') pb.omega = baseSpin * PHYS_FOLLOW_SPIN_FACTOR;
-      else if (cueHeight === 'low') pb.omega = -baseSpin * 1.2;
-      else pb.omega = 0; // stun shot (no initial spin)
+      // Signed top/back spin. Cloth torque determines follow/draw after impact.
+      pb.omega = (0.5 - cueFaceHitY) * 3 * speedMs / BALL_R;
+      pb.wx = -Math.sin(aimAng) * pb.omega;
+      pb.wy = Math.cos(aimAng) * pb.omega;
       // Side spin (sideOmega): independent vertical-axis rotation
       pb.sideOmega = calcInitialSideOmega(spinSign, speedMs);
     }
@@ -2281,13 +2066,21 @@ function runSimulation(route) {
   physicsTrails = trailData;
 
   let targetPocketed = false;
+  let targetPocket = null;
   let cuePocketed = false;
+  const intendedPocket = { ...pocketTarget };
   let frameCount = 0;
-  const MAX_FRAMES = 600;
+  const MAX_FRAMES = 1800;
+  const result = (timedOut = false) => {
+    const correctPocket = targetPocket && targetPocket.x === intendedPocket.x && targetPocket.y === intendedPocket.y;
+    return { targetPocketed, cueScratched: cuePocketed,
+      wrongPocket: targetPocketed && !correctPocket,
+      success: !!correctPocket && !cuePocketed && !timedOut, timedOut };
+  };
 
   function physStep() {
     if (!simRunning) return;
-    if (frameCount >= MAX_FRAMES) { stopSimulation(null); return; }
+    if (frameCount >= MAX_FRAMES) { stopSimulation(result(true)); return; }
     frameCount++;
 
     // --- Adaptive sub-stepping: ensure no ball moves more than BALL_R*0.5 per step ---
@@ -2308,30 +2101,12 @@ function runSimulation(route) {
         // Decay sideOmega independently (vertical-axis rotation on cloth)
         pb.sideOmega = decaySideOmega(pb.sideOmega, subDt);
 
-        const spd = Math.sqrt(pb.vx * pb.vx + pb.vy * pb.vy);
-        if (spd < 0.5 && Math.abs(pb.omega) < 0.1 && Math.abs(pb.sideOmega) < 0.1) {
-          pb.vx = 0; pb.vy = 0; pb.omega = 0; pb.sideOmega = 0; continue;
-        }
-        // Surface speed at contact point (simplified: ball always tends toward natural roll)
-        const surfaceV = spd - Math.abs(pb.omega) * pb.r;
-        let frictionDecel;
-        if (Math.abs(surfaceV) < 20) {
-          // Near rolling → low friction
-          frictionDecel = PHYS_MU_ROLL * PHYS_G;
-          const ratio = spd > 0.1 ? Math.max(0, (spd - frictionDecel * subDt) / spd) : 0;
-          pb.vx *= ratio; pb.vy *= ratio;
-          pb.omega *= 0.995;
-        } else {
-          // Sliding → higher friction, torque spins the ball toward rolling
-          frictionDecel = PHYS_MU_SLIDE * PHYS_G;
-          const ratio = spd > 0.1 ? Math.max(0, (spd - frictionDecel * subDt) / spd) : 0;
-          pb.vx *= ratio; pb.vy *= ratio;
-          // Friction gradually builds spin toward natural roll magnitude
-          const naturalOmegaMag = spd / pb.r;
-          const omegaDeficit = naturalOmegaMag - Math.abs(pb.omega);
-          if (pb.omega >= 0) pb.omega += omegaDeficit * 0.08;
-          else pb.omega -= omegaDeficit * 0.08;
-        }
+        applyClothFriction(pb, subDt, {
+          slideFriction: PHYS_MU_SLIDE,
+          rollFriction: PHYS_MU_ROLL,
+        });
+        const spd = Math.hypot(pb.vx, pb.vy);
+        pb.omega = spd > 0.01 ? (pb.vx * pb.wy - pb.vy * pb.wx) / spd : 0;
       }
 
       // 1.5. Save old positions for swept collision
@@ -2369,7 +2144,7 @@ function runSimulation(route) {
             // Check x range
             const crossT = dOld / (dOld - dNew);
             const crossX = oldX + (pb.x - oldX) * crossT;
-            if (crossX < seg.x1 - BALL_R || crossX > seg.x2 + BALL_R) continue;
+            if (crossX < seg.x1 || crossX > seg.x2) continue;
             if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           } else {
             // Vertical cushion
@@ -2381,7 +2156,7 @@ function runSimulation(route) {
             if (dOld * dNew >= 0) continue;
             const crossT = dOld / (dOld - dNew);
             const crossY = oldY + (pb.y - oldY) * crossT;
-            if (crossY < seg.y1 - BALL_R || crossY > seg.y2 + BALL_R) continue;
+            if (crossY < seg.y1 || crossY > seg.y2) continue;
             if (crossT < bestT) { bestT = crossT; bestSeg = seg; bestNx = normalX; bestNy = normalY; }
           }
         }
@@ -2392,15 +2167,20 @@ function runSimulation(route) {
           pb.y = oldY + (pb.y - oldY) * bestT + bestNy * 0.01;
 
           // Side-spin-aware cushion reflection
+          const impactSpeed = Math.hypot(pb.vx, pb.vy);
+          const cushionE = calcCushionRestitution(impactSpeed);
           const ref = reflectVelocityWithSideSpin(
-            pb.vx, pb.vy, pb.sideOmega, bestNx, bestNy, pb.r, PHYS_CUSHION_E
+            pb.vx, pb.vy, pb.sideOmega, bestNx, bestNy, pb.r, cushionE
           );
           pb.vx = ref.vx;
           pb.vy = ref.vy;
           pb.sideOmega = ref.sideOmega;
 
-          // High/low spin (omega) still loses energy on cushion contact
-          pb.omega *= 0.55;
+          // Simplified horizontal-spin retention at a cushion.
+          pb.wx *= 0.55;
+          pb.wy *= 0.55;
+          pb.x += pb.vx * subDt * (1 - bestT);
+          pb.y += pb.vy * subDt * (1 - bestT);
 
           const vn = pb.vx * bestNx + pb.vy * bestNy;
           playCushionSound(Math.abs(vn) * 0.5); // approximate pre-impact speed
@@ -2411,10 +2191,20 @@ function runSimulation(route) {
       for (const pb of physBalls) {
         if (pb.pocketed) continue;
         const margin = pb.r;
-        if (pb.x < margin) { pb.x = margin; if (pb.vx < 0) pb.vx = -pb.vx * PHYS_CUSHION_E; }
-        if (pb.x > TABLE_W - margin) { pb.x = TABLE_W - margin; if (pb.vx > 0) pb.vx = -pb.vx * PHYS_CUSHION_E; }
-        if (pb.y < margin) { pb.y = margin; if (pb.vy < 0) pb.vy = -pb.vy * PHYS_CUSHION_E; }
-        if (pb.y > TABLE_H - margin) { pb.y = TABLE_H - margin; if (pb.vy > 0) pb.vy = -pb.vy * PHYS_CUSHION_E; }
+        const left = GHOST_CUSHIONS[2], right = GHOST_CUSHIONS[3];
+        const top = GHOST_CUSHIONS[0], bottom = GHOST_CUSHIONS[1];
+        if (pb.x < margin && !isPointInPocketOpening(pb, left)) {
+          pb.x = margin; if (pb.vx < 0) pb.vx = -pb.vx * calcCushionRestitution(Math.hypot(pb.vx, pb.vy));
+        }
+        if (pb.x > TABLE_W - margin && !isPointInPocketOpening(pb, right)) {
+          pb.x = TABLE_W - margin; if (pb.vx > 0) pb.vx = -pb.vx * calcCushionRestitution(Math.hypot(pb.vx, pb.vy));
+        }
+        if (pb.y < margin && !isPointInPocketOpening(pb, top)) {
+          pb.y = margin; if (pb.vy < 0) pb.vy = -pb.vy * calcCushionRestitution(Math.hypot(pb.vx, pb.vy));
+        }
+        if (pb.y > TABLE_H - margin && !isPointInPocketOpening(pb, bottom)) {
+          pb.y = TABLE_H - margin; if (pb.vy > 0) pb.vy = -pb.vy * calcCushionRestitution(Math.hypot(pb.vx, pb.vy));
+        }
       }
 
       // 4. Ball-ball collisions (swept detection)
@@ -2472,27 +2262,11 @@ function runSimulation(route) {
           const jn = dvn * (1 + PHYS_BALL_E) / 2;
           a.vx -= jn * nx; a.vy -= jn * ny;
           b.vx += jn * nx; b.vy += jn * ny;
-          // Tangential friction
-          const tx = -ny, ty = nx;
-          const dvt = (a.vx - b.vx) * tx + (a.vy - b.vy) * ty;
-          const jt = dvt * 0.08;
-          a.vx -= jt * tx; a.vy -= jt * ty;
-          b.vx += jt * tx; b.vy += jt * ty;
-          // Spin exchange
-          const spinImpulse = jt / BALL_R * 0.4;
-          a.omega += spinImpulse;
-          b.omega -= spinImpulse;
-
-          // High/Low cue effect on first cue→target hit (approximate follow/draw)
-          if (a.type === 'cue' && b.type === 'target' && !a.cueHitTarget) {
-            a.cueHitTarget = true;
-            if (cueHeight === 'high') { a.vx *= PHYS_FOLLOW_FACTOR; a.vy *= PHYS_FOLLOW_FACTOR; a.omega += speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
-            else if (cueHeight === 'low') { a.vx *= PHYS_DRAW_FACTOR; a.vy *= PHYS_DRAW_FACTOR; a.omega = -speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
-          } else if (b.type === 'cue' && a.type === 'target' && !b.cueHitTarget) {
-            b.cueHitTarget = true;
-            if (cueHeight === 'high') { b.vx *= PHYS_FOLLOW_FACTOR; b.vy *= PHYS_FOLLOW_FACTOR; b.omega += speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
-            else if (cueHeight === 'low') { b.vx *= PHYS_DRAW_FACTOR; b.vy *= PHYS_DRAW_FACTOR; b.omega = -speedMs / BALL_R * PHYS_FOLLOW_SPIN_FACTOR; }
-          }
+          // Equal-height, frictionless sphere contact preserves horizontal spin.
+          // Cloth friction in the next step produces follow or draw naturally.
+          const remaining = subDt * (1 - Math.max(0, hitT));
+          a.x += a.vx * remaining; a.y += a.vy * remaining;
+          b.x += b.vx * remaining; b.y += b.vy * remaining;
         }
       }
 
@@ -2503,7 +2277,7 @@ function runSimulation(route) {
           const d = Math.sqrt((pb.x - pp.x) ** 2 + (pb.y - pp.y) ** 2);
           if (d < pp.r + BALL_R * 0.5) {
             pb.pocketed = true;
-            if (pb.type === 'target') targetPocketed = true;
+            if (pb.type === 'target') { targetPocketed = true; targetPocket = pp; }
             if (pb.type === 'cue') cuePocketed = true;
             break;
           }
@@ -2520,23 +2294,35 @@ function runSimulation(route) {
     });
 
     // Stop checks
-    if (targetPocketed && frameCount > 10) { stopSimulation({ targetPocketed: true, cueScratched: false }); return; }
-    if (cuePocketed && frameCount > 10) { stopSimulation({ targetPocketed: false, cueScratched: true }); return; }
 
     let allStill = true;
     for (const pb of physBalls) {
       if (pb.pocketed) continue;
-      if (Math.abs(pb.vx) > 10 || Math.abs(pb.vy) > 10) { allStill = false; break; }
+      if (Math.hypot(pb.vx, pb.vy) > 0.5 || Math.hypot(pb.wx, pb.wy) * pb.r > 0.5) {
+        allStill = false; break;
+      }
     }
-    if (allStill && frameCount > 120) {
-      stopSimulation({ targetPocketed, cueScratched: cuePocketed });
+    if (allStill) {
+      stopSimulation(result());
       return;
     }
 
-    requestAnimationFrame(physStep);
   }
 
-  requestAnimationFrame(physStep);
+  // Fixed simulation steps driven by elapsed time, independent of display Hz.
+  let previousTime = performance.now();
+  let accumulator = 0;
+  function animateSimulation(now) {
+    if (!simRunning) return;
+    accumulator += Math.min(Math.max((now - previousTime) / 1000, 0), 0.1);
+    previousTime = now;
+    while (accumulator + 1e-9 >= PHYS_DT && simRunning) {
+      accumulator -= PHYS_DT;
+      physStep();
+    }
+    if (simRunning) simFrameId = requestAnimationFrame(animateSimulation);
+  }
+  simFrameId = requestAnimationFrame(animateSimulation);
 }
 
 // ==================== UI HANDLERS ====================
@@ -2553,13 +2339,22 @@ function updateInfo() {
   else if (hasCalculated && calculatedRoutes.length === 0) {
     msg = `❌ 未找到符合条件的${cushionCount}星解球路线，请调整球位或颗星数`;
   } else if (calculatedRoutes.length) {
-    const best = calculatedRoutes[0];
-    const seqStr = best.sequence.join('→');
-    const distStr = (best.totalDist / 100).toFixed(0);
-    msg = `${calculatedRoutes.length}条路线 · 最佳: ${seqStr} (${distStr}dm)`;
+    const route = calculatedRoutes[selectedRouteIndex] || calculatedRoutes[0];
+    const names = { top: '上', bottom: '下', left: '左', right: '右' };
+    const seqStr = route.sequence.map(s => names[s] || s).join('→');
+    const distStr = (route.totalDist / 1000).toFixed(2);
+    msg = `路线 ${selectedRouteIndex + 1}/${calculatedRoutes.length} · ${seqStr} · 约 ${distStr} m`;
   } else {
     msg = `就绪 · ${obstacles.length ? obstacles.length + '个障碍 ' : ''}${cushionCount}星解球`;
   }
+
+  const setupReady = !!cue && !!target && !!pocketTarget;
+  const calcButton = document.getElementById('btnCalc');
+  const simButton = document.getElementById('btnSim');
+  calcButton.disabled = !setupReady;
+  simButton.disabled = !setupReady;
+  calcButton.title = setupReady ? '寻找可行解球路线' : '请先放置母球、目标球并选择袋口';
+  simButton.title = setupReady ? '用当前速度和杆法验证路线' : '请先完成摆球';
 
   info.textContent = msg;
 
@@ -2603,17 +2398,25 @@ function updateRouteSelector() {
     chip.addEventListener('click', () => {
       selectedRouteIndex = parseInt(chip.dataset.route);
       customRoute = null;
-      updateRouteSelector();
+      updateInfo();
     });
   });
+}
+
+function selectPlacementType(type) {
+  document.querySelectorAll('[data-type]').forEach(b => {
+    const active = b.dataset.type === type;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
+  selectedType = type;
+  updateInfo();
 }
 
 // Ball type buttons
 document.querySelectorAll('[data-type]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('[data-type]').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    selectedType = btn.dataset.type;
+    selectPlacementType(btn.dataset.type);
   });
 });
 
@@ -2623,10 +2426,7 @@ document.querySelectorAll('.cushion-btn').forEach(btn => {
     document.querySelectorAll('.cushion-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     cushionCount = parseInt(btn.dataset.n);
-    calculatedRoutes = [];
-    customRoute = null;
-    selectedRouteIndex = 0;
-    hasCalculated = false;
+    invalidateLayout();
     updateInfo();
   });
 });
@@ -2646,7 +2446,7 @@ document.getElementById('btnCalc').addEventListener('click', () => {
 document.getElementById('btnSim').addEventListener('click', () => {
   if (simRunning) {
     stopSimulation();
-    document.getElementById('btnSim').textContent = '物理模拟';
+    document.getElementById('btnSim').textContent = '模拟验证';
     return;
   }
   openAimModal();
@@ -2661,10 +2461,8 @@ document.getElementById('btnClear').addEventListener('click', () => {
   stopSimulation();
   balls = [];
   pocketTarget = null;
-  calculatedRoutes = [];
-  selectedRouteIndex = 0;
-  physicsTrails = [];
-  document.getElementById('btnSim').textContent = '物理模拟';
+  invalidateLayout();
+  document.getElementById('btnSim').textContent = '模拟验证';
   updateInfo();
 });
 
@@ -2682,6 +2480,8 @@ document.querySelectorAll('[data-height]').forEach(btn => {
     document.querySelectorAll('[data-height]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     cueHeight = btn.dataset.height;
+    syncFaceFromCue();
+    syncAllCueControls();
   });
 });
 
@@ -2691,6 +2491,8 @@ document.querySelectorAll('[data-spin]').forEach(btn => {
     document.querySelectorAll('[data-spin]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     cueSpin = btn.dataset.spin;
+    syncFaceFromCue();
+    syncAllCueControls();
   });
 });
 
@@ -2742,6 +2544,7 @@ document.querySelectorAll('.modal-spin-btn').forEach(btn => {
 
 // Initial draw
 updateInfo();
+selectPlacementType(selectedType);
 requestAnimationFrame(loop);
 
 // Debug hook (only exposed when URL has ?debug=1)

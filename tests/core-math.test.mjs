@@ -313,3 +313,85 @@ describe('calculateKickRoutes', () => {
     }
   });
 });
+
+// Regression cases: routes must remain on the table and reach the object ball last.
+describe('kick route geometry regressions', () => {
+  it('rejects ghost balls outside the playable ball-center rectangle', () => {
+    const routes = calculateKickRoutes(
+      { x: 300, y: 300 }, { x: 29, y: 29 }, POCKET_POSITIONS[4], [], 4
+    );
+    assert.deepEqual(routes, []);
+  });
+
+  it('rejects a route that contacts the target before the last cushion', () => {
+    const cue = { x: 300, y: 300 };
+    const target = { x: 100, y: 200 };
+    const routes = calculateKickRoutes(cue, target, POCKET_POSITIONS[5], [], 2);
+    assert.ok(!routes.some(route => route.sequence.join(',') === 'right,left'),
+      'right,left passes 35.60 mm from the target before the second cushion');
+    for (const route of routes) {
+      assert.equal(pathHitsObstacle(route.points.slice(0, -2), [target], 2 * BALL_R), false);
+    }
+  });
+
+  it('rejects cushion points beyond an end of the table', () => {
+    assert.equal(pointOnCushionSegment({ x: -100, y: BALL_R }, GHOST_CUSHIONS[0]), false);
+    assert.equal(pointOnCushionSegment({ x: TABLE_W + 100, y: BALL_R }, GHOST_CUSHIONS[0]), false);
+    assert.equal(pointOnCushionSegment({ x: BALL_R, y: TABLE_H + 100 }, GHOST_CUSHIONS[2]), false);
+  });
+
+  it('rejects points off the cushion line or with non-finite coordinates', () => {
+    assert.equal(pointOnCushionSegment({ x: 400, y: 400 }, GHOST_CUSHIONS[0]), false);
+    assert.equal(pointOnCushionSegment({ x: NaN, y: BALL_R }, GHOST_CUSHIONS[0]), false);
+  });
+
+  it('rejects invalid cushion counts without unbounded recursion', () => {
+    for (const n of [-1, 0.5, 6, NaN, Infinity]) {
+      assert.throws(() => generateCushionSequences(n), RangeError);
+    }
+  });
+
+  it('rejects zero-length target-to-pocket paths', () => {
+    assert.deepEqual(calculateKickRoutes(
+      { x: 300, y: 300 }, POCKET_POSITIONS[0], POCKET_POSITIONS[0], [], 2
+    ), []);
+  });
+});
+
+describe('pocket exit geometry', () => {
+  it('rejects routes whose target-to-pocket line crosses solid cushion', () => {
+    // At y = BALL_R this target line crosses x = 1957.07, far from the corner mouth.
+    assert.deepEqual(calculateKickRoutes(
+      { x: 600, y: 600 }, { x: 500, y: 100 }, POCKET_POSITIONS[1], [], 1
+    ), []);
+  });
+
+  it('exposes the same pocket opening used by the simulation boundary', async () => {
+    const { isPointInPocketOpening } = await import('../mirror-method.mjs');
+    assert.equal(typeof isPointInPocketOpening, 'function');
+    assert.equal(isPointInPocketOpening({ x: TABLE_W / 2 + 39, y: BALL_R }, GHOST_CUSHIONS[0]), true);
+    assert.equal(isPointInPocketOpening({ x: TABLE_W / 2 + 41, y: BALL_R }, GHOST_CUSHIONS[0]), false);
+    assert.equal(isPointInPocketOpening({ x: BALL_R, y: 43 }, GHOST_CUSHIONS[2]), true);
+    assert.equal(isPointInPocketOpening({ x: BALL_R, y: 45 }, GHOST_CUSHIONS[2]), false);
+  });
+
+  it('allows clear corner and side pocket entries', async () => {
+    const { targetPathClearsCushions } = await import('../mirror-method.mjs');
+    assert.equal(typeof targetPathClearsCushions, 'function');
+    assert.equal(targetPathClearsCushions({ x: 500, y: 500 }, POCKET_POSITIONS[0]), true);
+    assert.equal(targetPathClearsCushions({ x: 1000, y: 500 }, POCKET_POSITIONS[2]), true);
+  });
+
+  it('does not mistake another pocket opening for the selected exit', async () => {
+    const { targetPathClearsCushions } = await import('../mirror-method.mjs');
+    assert.equal(typeof targetPathClearsCushions, 'function');
+    const target = { x: 100, y: (TABLE_W - 100) * BALL_R / (TABLE_W / 2) };
+    assert.equal(targetPathClearsCushions(target, POCKET_POSITIONS[1]), false);
+  });
+
+  it('rejects an object ball directed out through solid rail from a cushion', async () => {
+    const { targetPathClearsCushions } = await import('../mirror-method.mjs');
+    assert.equal(typeof targetPathClearsCushions, 'function');
+    assert.equal(targetPathClearsCushions({ x: 1000, y: BALL_R }, POCKET_POSITIONS[0]), false);
+  });
+});

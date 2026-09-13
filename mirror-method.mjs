@@ -8,6 +8,17 @@ export const TABLE_H = 1270;
 export const BALL_R = 28.575;
 export const POCKET_R = 44;
 export const SIDE_POCKET_R = 40;
+const GEOMETRY_EPS = 1e-7;
+
+function isFinitePoint(pt) {
+  return pt != null && Number.isFinite(pt.x) && Number.isFinite(pt.y);
+}
+
+function isPlayableBallCenter(pt) {
+  return isFinitePoint(pt) &&
+    pt.x >= BALL_R - GEOMETRY_EPS && pt.x <= TABLE_W - BALL_R + GEOMETRY_EPS &&
+    pt.y >= BALL_R - GEOMETRY_EPS && pt.y <= TABLE_H - BALL_R + GEOMETRY_EPS;
+}
 
 // Cushion definitions (table-edge cushions)
 export const CUSHIONS = [
@@ -82,6 +93,16 @@ export function distToSegmentSq(px, py, x1, y1, x2, y2) {
  * (not in a pocket gap area).
  */
 export function pointOnCushionSegment(pt, cushion) {
+  if (!isFinitePoint(pt)) return false;
+  if (cushion.horiz) {
+    if (Math.abs(pt.y - cushion.y1) > GEOMETRY_EPS ||
+        pt.x < Math.min(cushion.x1, cushion.x2) - GEOMETRY_EPS ||
+        pt.x > Math.max(cushion.x1, cushion.x2) + GEOMETRY_EPS) return false;
+  } else {
+    if (Math.abs(pt.x - cushion.x1) > GEOMETRY_EPS ||
+        pt.y < Math.min(cushion.y1, cushion.y2) - GEOMETRY_EPS ||
+        pt.y > Math.max(cushion.y1, cushion.y2) + GEOMETRY_EPS) return false;
+  }
   if (cushion.horiz) {
     const sideX = TABLE_W / 2;
     const gaps = [
@@ -106,12 +127,65 @@ export function pointOnCushionSegment(pt, cushion) {
 }
 
 /**
+ * Whether a ball center can pass through a pocket opening at a given cushion.
+ * Only the coordinate along the cushion is examined, so the simulation can use
+ * this for balls just inside or outside its boundary. This is the simplified
+ * straight-mouth model: side openings have radius 40 mm, corners 44 mm.
+ * Mirror rebound candidates keep the larger r + BALL_R margin above to avoid
+ * recommending a bounce at a pocket jaw.
+ */
+export function isPointInPocketOpening(pt, cushion) {
+  if (!isFinitePoint(pt)) return false;
+  if (cushion.horiz) {
+    return Math.abs(pt.x) < POCKET_R ||
+      Math.abs(pt.x - TABLE_W) < POCKET_R ||
+      Math.abs(pt.x - TABLE_W / 2) < SIDE_POCKET_R;
+  }
+  return Math.abs(pt.y) < POCKET_R || Math.abs(pt.y - TABLE_H) < POCKET_R;
+}
+
+/** Check that the target reaches the selected mouth without first hitting rail. */
+export function targetPathClearsCushions(targetBall, pocketTarget) {
+  if (!isPlayableBallCenter(targetBall) || !isFinitePoint(pocketTarget)) return false;
+  const pocket = POCKET_POSITIONS.find(p =>
+    Math.abs(p.x - pocketTarget.x) < GEOMETRY_EPS &&
+    Math.abs(p.y - pocketTarget.y) < GEOMETRY_EPS
+  );
+  if (!pocket) return false;
+
+  const dx = pocket.x - targetBall.x, dy = pocket.y - targetBall.y;
+  for (const cushion of GHOST_CUSHIONS) {
+    const delta = cushion.horiz ? dy : dx;
+    const start = cushion.horiz ? targetBall.y : targetBall.x;
+    const edge = cushion.horiz ? cushion.y1 : cushion.x1;
+    // Only an outward crossing is a possible obstruction. A target already
+    // touching one cushion may move away from it toward an opposite pocket.
+    const inward = edge < (cushion.horiz ? TABLE_H : TABLE_W) / 2 ? 1 : -1;
+    if (delta * inward >= 0) continue;
+    const t = (edge - start) / delta;
+    if (t < -GEOMETRY_EPS || t > 1) continue;
+    const hit = { x: targetBall.x + t * dx, y: targetBall.y + t * dy };
+    const pocketOnThisRail = cushion.horiz
+      ? (inward > 0 ? pocket.y === 0 : pocket.y === TABLE_H)
+      : (inward > 0 ? pocket.x === 0 : pocket.x === TABLE_W);
+    const offset = cushion.horiz ? Math.abs(hit.x - pocket.x) : Math.abs(hit.y - pocket.y);
+    // Passing through a different mouth does not make a long path outside the
+    // playable rectangle a valid route to the selected pocket.
+    if (!pocketOnThisRail || !isPointInPocketOpening(hit, cushion) || offset >= pocket.r) return false;
+  }
+  return true;
+}
+
+/**
  * Generate all valid cushion sequences of length n.
  * Consecutive same-cushion hits are excluded.
  * @param {number} n - Number of cushions (1-5)
  * @returns {number[][]} Array of sequences (each sequence is an array of cushion indices 0-3)
  */
 export function generateCushionSequences(n) {
+  if (!Number.isInteger(n) || n < 0 || n > 5) {
+    throw new RangeError('Cushion count must be an integer from 0 to 5');
+  }
   const indices = [0, 1, 2, 3]; // top, bottom, left, right
   const result = [];
 
@@ -181,8 +255,13 @@ export function pathHitsObstacle(points, obstacles, safeDist) {
 export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles, cushionCount) {
   const safeDist = BALL_R * 2.2;
 
+  if (!isPlayableBallCenter(cueBall) || !isPlayableBallCenter(targetBall) ||
+      !isFinitePoint(pocketTarget)) return [];
+  if (!targetPathClearsCushions(targetBall, pocketTarget)) return [];
+
   // Ghost ball position
   const ghost = calcGhostBall(targetBall, pocketTarget);
+  if (!isPlayableBallCenter(ghost)) return [];
 
   const sequences = generateCushionSequences(cushionCount);
   const validRoutes = [];
@@ -227,6 +306,10 @@ export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles
 
     if (!valid) continue;
 
+    // The target is also an obstacle until every requested cushion has been hit.
+    // Checking only the red obstacles permits routes that hit the target early.
+    if (pathHitsObstacle(allPoints, [targetBall], BALL_R * 2)) continue;
+
     // Last segment: hit point → ghost ball → pocket
     allPoints.push({ x: ghost.x, y: ghost.y });
     allPoints.push({ x: pocketTarget.x, y: pocketTarget.y });
@@ -269,7 +352,7 @@ export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles
       sequence: seq.map(i => CUSHIONS[i].name),
       // Energy-aware scoring: each cushion bounce loses ~28% energy (restitution 0.72)
       // effectiveDist estimates the "felt" distance accounting for energy loss
-      effectiveDist: totalDist / Math.pow(0.72, seq.length),
+      effectiveDist: totalDist / Math.pow(0.83, seq.length),
     });
   }
 

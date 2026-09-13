@@ -6,13 +6,30 @@ import assert from 'node:assert/strict';
 import {
   calcSquirtAngle,
   calcInitialSideOmega,
+  calcCushionRestitution,
   decaySideOmega,
   calcCushionBounce,
   reflectVelocityWithSideSpin,
   PHYS_SQUIRT_MAX_ANGLE,
   PHYS_SIDE_SPIN_MAX,
   PHYS_SIDE_SPIN_DECAY,
+  PHYS_CUSHION_TANGENTIAL_FRICTION,
+  PHYS_CUSHION_SIDE_SPIN_RETENTION,
 } from '../side-spin-physics.mjs';
+
+describe('calcCushionRestitution — Chinese eight-ball baseline', () => {
+  it('uses the public effective rail baseline for normal-speed shots', () => {
+    assert.equal(calcCushionRestitution(0), 0.83);
+    assert.equal(calcCushionRestitution(2500), 0.83);
+  });
+
+  it('softens the rail progressively above the rigid-model range', () => {
+    const medium = calcCushionRestitution(5250);
+    assert.ok(Math.abs(medium - 0.795) < 1e-12);
+    assert.equal(calcCushionRestitution(8000), 0.76);
+    assert.equal(calcCushionRestitution(12000), 0.76);
+  });
+});
 
 const BALL_R = 28.575; // standard ball radius in mm
 
@@ -23,16 +40,16 @@ describe('calcSquirtAngle', () => {
     assert.ok(Math.abs(calcSquirtAngle(0, 3000)) === 0);
   });
 
-  it('should return positive angle for right spin (aim compensation right)', () => {
+  it('should deflect left of the fixed cue direction for right spin', () => {
     const angle = calcSquirtAngle(1, 3000);
-    assert.ok(angle > 0, `Expected positive angle, got ${angle}`);
-    assert.ok(angle <= PHYS_SQUIRT_MAX_ANGLE * 1.01);
+    assert.ok(angle < 0, `Expected negative screen-coordinate angle, got ${angle}`);
+    assert.ok(Math.abs(angle) <= PHYS_SQUIRT_MAX_ANGLE * 1.01);
   });
 
-  it('should return negative angle for left spin (aim compensation left)', () => {
+  it('should deflect right of the fixed cue direction for left spin', () => {
     const angle = calcSquirtAngle(-1, 3000);
-    assert.ok(angle < 0, `Expected negative angle, got ${angle}`);
-    assert.ok(angle >= -PHYS_SQUIRT_MAX_ANGLE * 1.01);
+    assert.ok(angle > 0, `Expected positive screen-coordinate angle, got ${angle}`);
+    assert.ok(Math.abs(angle) <= PHYS_SQUIRT_MAX_ANGLE * 1.01);
   });
 
   it('should be symmetric: left and right equal magnitude opposite sign', () => {
@@ -55,23 +72,27 @@ describe('calcInitialSideOmega', () => {
     assert.ok(Math.abs(calcInitialSideOmega(0, 3000)) === 0);
   });
 
-  it('should return positive omega for right spin', () => {
+  it('should return counterclockwise screen rotation for right spin', () => {
     const omega = calcInitialSideOmega(1, 3000);
-    assert.ok(omega > 0);
-    assert.strictEqual(omega, PHYS_SIDE_SPIN_MAX); // reference speed
+    assert.ok(omega < 0);
+    assert.strictEqual(omega, -PHYS_SIDE_SPIN_MAX); // reference speed
   });
 
-  it('should return negative omega for left spin', () => {
+  it('should return clockwise screen rotation for left spin', () => {
     const omega = calcInitialSideOmega(-1, 3000);
-    assert.ok(omega < 0);
-    assert.strictEqual(omega, -PHYS_SIDE_SPIN_MAX);
+    assert.ok(omega > 0);
+    assert.strictEqual(omega, PHYS_SIDE_SPIN_MAX);
   });
 
   it('should scale with shot speed', () => {
     const slow = calcInitialSideOmega(1, 1000);
     const fast = calcInitialSideOmega(1, 6000);
-    assert.ok(fast > slow);
+    assert.ok(Math.abs(fast) > Math.abs(slow));
     assert.ok(Math.abs(fast - slow * 6) < 0.01);
+  });
+
+  it('caps extreme-speed side spin at the public Chinese-eight baseline', () => {
+    assert.equal(Math.abs(calcInitialSideOmega(1, 10000)), 150);
   });
 
   it('should be symmetric: left/right equal magnitude at same intensity', () => {
@@ -166,8 +187,8 @@ describe('calcCushionBounce', () => {
 
     const fullDelta = Math.abs(full.vtOut - vt);
     const halfDelta = Math.abs(half.vtOut - vt);
-    assert.ok(fullDelta > halfDelta * 0.8,
-      `Full effect (${fullDelta}) should be >= 80% larger than half (${halfDelta})`);
+    assert.ok(Math.abs(fullDelta - halfDelta * 2) < 1e-8,
+      `Unsaturated full effect (${fullDelta}) should be twice half (${halfDelta})`);
   });
 
   // Acceptance Test 4: Side spin decreases after bounce
@@ -190,6 +211,51 @@ describe('calcCushionBounce', () => {
     // With non-zero sideOmega but zero normal impulse, the tangential
     // friction is capped to 0, so vt should remain unchanged
     assert.strictEqual(result.vtOut, 100);
+    assert.strictEqual(result.sideOmegaOut, 30);
+  });
+
+  it('should leave a ball already moving away from the cushion unchanged', () => {
+    for (const omega of [0, 30]) {
+      assert.deepEqual(calcCushionBounce(1000, 200, omega, r, restitution), {
+        vnOut: 1000, vtOut: 200, sideOmegaOut: omega,
+      });
+    }
+  });
+
+  it('should stop contact slip without overshooting before empirical spin damping', () => {
+    const result = calcCushionBounce(-3000, 900, 30, r, restitution);
+    const omegaAfterImpulse = result.sideOmegaOut / PHYS_CUSHION_SIDE_SPIN_RETENTION;
+    const slipAfterImpulse = result.vtOut - omegaAfterImpulse * r;
+    assert.ok(Math.abs(slipAfterImpulse) < 1e-8,
+      `Friction should stop the initial 42.75 mm/s slip, got ${slipAfterImpulse}`);
+  });
+
+  it('should respect the Coulomb impulse limit for a grazing contact', () => {
+    const vn = -100;
+    const vt = 2000;
+    const result = calcCushionBounce(vn, vt, 30, r, restitution);
+    const maximumImpulse = PHYS_CUSHION_TANGENTIAL_FRICTION * (1 + restitution) * -vn;
+    assert.ok(Math.abs(vt - result.vtOut - maximumImpulse) < 1e-8);
+  });
+
+  it('should never create kinetic energy at a passive cushion', () => {
+    // Solid sphere: E/m = (vn² + vt²)/2 + r²*omega²/5.
+    const energy = (vn, vt, omega) => (vn * vn + vt * vt) / 2 + (r * omega) ** 2 / 5;
+    const cases = [[-1000, 500, 30, restitution]];
+    for (const e of [0.4, restitution, 1]) {
+      for (const vn of [-50, -1000, -3000]) {
+        for (const vt of [-3000, -500, 0, 500, 3000]) {
+          for (const omega of [-60, -1, 0, 1, 60]) cases.push([vn, vt, omega, e]);
+        }
+      }
+    }
+    for (const [vn, vt, omega, e] of cases) {
+      const result = calcCushionBounce(vn, vt, omega, r, e);
+      const before = energy(vn, vt, omega);
+      const after = energy(result.vnOut, result.vtOut, result.sideOmegaOut);
+      assert.ok(after <= before + 1e-8 * Math.max(1, before),
+        `Energy increased for [${vn}, ${vt}, ${omega}, ${e}]: ${before} -> ${after}`);
+    }
   });
 });
 
@@ -241,9 +307,21 @@ describe('reflectVelocityWithSideSpin', () => {
     const noSpin = reflectVelocityWithSideSpin(1000, -3000, 0, 0, 1, r, e);
     const withSpin = reflectVelocityWithSideSpin(1000, -3000, 60, 0, 1, r, e);
 
-    // Both should have angle-preserving base reflection
-    // Side spin should cause ADDITIONAL difference in tangential (x) velocity
+    // The side-spin impulse should affect the tangential (x) velocity.
     const diffX = Math.abs(withSpin.vx - noSpin.vx);
     assert.ok(diffX > 0.1, `Expected spin to affect tangential velocity, diffX=${diffX}`);
+  });
+
+  it('should send right english toward the shooter’s right after a head-on hit on every rail', () => {
+    for (const [nx, ny] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const vx = -nx * 3000;
+      const vy = -ny * 3000;
+      const omega = calcInitialSideOmega(1, 3000);
+      const result = reflectVelocityWithSideSpin(vx, vy, omega, nx, ny, r, e);
+      // Screen-coordinate right of incoming d=(-nx,-ny) is (ny,-nx).
+      const rightwardSpeed = result.vx * ny - result.vy * nx;
+      assert.ok(rightwardSpeed > 0,
+        `Right english went left at normal [${nx}, ${ny}]: ${rightwardSpeed}`);
+    }
   });
 });
