@@ -144,6 +144,12 @@ export function isPointInPocketOpening(pt, cushion) {
   return Math.abs(pt.y) < POCKET_R || Math.abs(pt.y - TABLE_H) < POCKET_R;
 }
 
+/** Return the pocket whose shared straight-mouth capture circle contains a ball center. */
+export function pocketAtPoint(pt) {
+  if (!isFinitePoint(pt)) return null;
+  return POCKET_POSITIONS.find(pocket => Math.hypot(pt.x - pocket.x, pt.y - pocket.y) < pocket.r) || null;
+}
+
 /** Check that the target reaches the selected mouth without first hitting rail. */
 export function targetPathClearsCushions(targetBall, pocketTarget) {
   if (!isPlayableBallCenter(targetBall) || !isFinitePoint(pocketTarget)) return false;
@@ -252,7 +258,7 @@ export function pathHitsObstacle(points, obstacles, safeDist) {
  * @param {number} cushionCount - Number of cushions (1-5)
  * @returns {object[]} Array of valid routes, sorted by distance
  */
-export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles, cushionCount) {
+export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles, cushionCount, options = {}) {
   const safeDist = BALL_R * 2.2;
 
   if (!isPlayableBallCenter(cueBall) || !isPlayableBallCenter(targetBall) ||
@@ -359,5 +365,7 @@ export function calculateKickRoutes(cueBall, targetBall, pocketTarget, obstacles
   // Sort by energy-aware effective distance (prefer routes that maintain more energy)
   validRoutes.sort((a, b) => a.effectiveDist - b.effectiveDist);
 
-  return validRoutes.slice(0, 5);
+  const requestedLimit = Number.isInteger(options.limit) ? options.limit : 5;
+  const limit = Math.max(1, Math.min(50, requestedLimit));
+  return validRoutes.slice(0, limit);
 }
