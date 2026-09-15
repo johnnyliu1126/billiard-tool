@@ -120,6 +120,40 @@ describe('ball detection', () => {
     assert.equal(result.balls.length, 2);
     assert.ok(result.confidence > 0.45);
   });
+
+  it('detects a green object ball whose color is close to the felt', () => {
+    const img = image(508, 254, [18, 126, 80, 255]);
+    circle(img, 102, 70, 6, [240, 238, 226, 255]);
+    circle(img, 320, 116, 6, [25, 145, 70, 255]);
+    const found = detectBallsOnTable(img);
+    assert.equal(found.filter(ball => ball.kind === 'object').length, 1);
+  });
+
+  it('does not report a soft felt shadow as an object ball', () => {
+    const img = image(508, 254, [18, 126, 80, 255]);
+    circle(img, 102, 70, 6, [240, 238, 226, 255]);
+    circle(img, 320, 116, 6, [9, 63, 40, 255]);
+    const found = detectBallsOnTable(img);
+    assert.equal(found.filter(ball => ball.kind === 'object').length, 0);
+  });
+
+  it('separates two touching object balls', () => {
+    const img = image(508, 254, [18, 126, 80, 255]);
+    circle(img, 102, 70, 6, [240, 238, 226, 255]);
+    circle(img, 320, 116, 6, [225, 42, 38, 255]);
+    circle(img, 332, 116, 6, [241, 195, 25, 255]);
+    const found = detectBallsOnTable(img);
+    assert.equal(found.filter(ball => ball.kind === 'object').length, 2);
+  });
+
+  it('keeps a full-sized cue ball instead of a smaller white glare spot', () => {
+    const img = image(508, 254, [18, 126, 80, 255]);
+    circle(img, 102, 70, 6, [240, 238, 226, 255]);
+    circle(img, 250, 110, 4, [255, 255, 255, 255]);
+    circle(img, 340, 150, 6, [225, 42, 38, 255]);
+    const cue = detectBallsOnTable(img).find(ball => ball.kind === 'cue');
+    assert.ok(Math.abs(cue.imageX - 102) < 5);
+  });
 });
 
 describe('automatic route choice from a photo', () => {
@@ -146,5 +180,17 @@ describe('automatic route choice from a photo', () => {
     const best = findBestPhotoRoute(cue, objects, 1, { targetIndex: 1 });
     assert.ok(best);
     assert.strictEqual(best.target, objects[1]);
+  });
+
+  it('searches only the explicitly selected set of legal targets', () => {
+    const cue = { x: 600, y: 600, kind: 'cue' };
+    const objects = [
+      { x: 1900, y: 600, kind: 'object' },
+      { x: 1500, y: 250, kind: 'object' },
+      { x: 900, y: 900, kind: 'object' },
+    ];
+    const best = findBestPhotoRoute(cue, objects, 1, { targetIndexes: [0] });
+    assert.ok(best);
+    assert.equal(best.targetIndex, 0);
   });
 });

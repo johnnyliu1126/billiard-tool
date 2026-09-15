@@ -12,8 +12,9 @@ import {
   calcGhostBall,
   pathHitsObstacle,
   calculateKickRoutes,
-  TABLE_W, TABLE_H, BALL_R,
+  TABLE_W, TABLE_H, BALL_R, POCKET_R, SIDE_POCKET_R,
   GHOST_CUSHIONS, CUSHIONS, POCKET_POSITIONS,
+  pocketAtPoint,
 } from '../mirror-method.mjs';
 
 // ==================== reflectPoint ====================
@@ -296,6 +297,13 @@ describe('calculateKickRoutes', () => {
     assert.ok(routes.length <= 5);
   });
 
+  it('supports a caller-specified candidate limit for downstream quality ranking', () => {
+    const routes = calculateKickRoutes(
+      { x: 800, y: 600 }, { x: 1800, y: 600 }, POCKET_POSITIONS[1], [], 4, { limit: 2 }
+    );
+    assert.equal(routes.length, 2);
+  });
+
   it('should have correct route structure', () => {
     const cue = { x: 600, y: 600 };
     const target = { x: 1900, y: 600 };
@@ -359,6 +367,12 @@ describe('kick route geometry regressions', () => {
 });
 
 describe('pocket exit geometry', () => {
+  it('uses the public mouth radius as the shared straight-pocket capture boundary', () => {
+    assert.equal(pocketAtPoint({ x: TABLE_W / 2 + SIDE_POCKET_R - 0.1, y: 0 })?.x, TABLE_W / 2);
+    assert.equal(pocketAtPoint({ x: TABLE_W / 2 + SIDE_POCKET_R + 0.1, y: 0 }), null);
+    assert.equal(pocketAtPoint({ x: POCKET_R - 0.1, y: 0 })?.x, 0);
+    assert.equal(pocketAtPoint({ x: POCKET_R + 0.1, y: 0 }), null);
+  });
   it('rejects routes whose target-to-pocket line crosses solid cushion', () => {
     // At y = BALL_R this target line crosses x = 1957.07, far from the corner mouth.
     assert.deepEqual(calculateKickRoutes(

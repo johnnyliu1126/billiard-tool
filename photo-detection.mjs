@@ -213,6 +213,107 @@ function tableColor(image) {
   return { rgb, hsv: rgbToHsv(...rgb) };
 }
 
+function meanDiskColor(image, cx, cy, radius) {
+  let r = 0, g = 0, b = 0, count = 0;
+  const radiusSq = radius * radius;
+  for (let y = Math.max(0, Math.floor(cy - radius)); y <= Math.min(image.height - 1, Math.ceil(cy + radius)); y++) {
+    for (let x = Math.max(0, Math.floor(cx - radius)); x <= Math.min(image.width - 1, Math.ceil(cx + radius)); x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 > radiusSq) continue;
+      const i = (y * image.width + x) * 4;
+      r += image.data[i]; g += image.data[i + 1]; b += image.data[i + 2]; count++;
+    }
+  }
+  return count ? [r / count, g / count, b / count] : [0, 0, 0];
+}
+
+function colorDistance(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) / 441.7;
+}
+
+function sampleColor(image, x, y) {
+  x = Math.max(0, Math.min(image.width - 1, Math.round(x)));
+  y = Math.max(0, Math.min(image.height - 1, Math.round(y)));
+  const i = (y * image.width + x) * 4;
+  return [image.data[i], image.data[i + 1], image.data[i + 2]];
+}
+
+function refineCandidateCenter(image, cx, cy, radius, feltRgb) {
+  let weightedX = 0, weightedY = 0, total = 0;
+  const reach = radius * 1.25;
+  for (let y = Math.max(0, Math.floor(cy - reach)); y <= Math.min(image.height - 1, Math.ceil(cy + reach)); y++) {
+    for (let x = Math.max(0, Math.floor(cx - reach)); x <= Math.min(image.width - 1, Math.ceil(cx + reach)); x++) {
+      if (Math.hypot(x - cx, y - cy) > reach) continue;
+      const difference = colorDistance(sampleColor(image, x, y), feltRgb);
+      const weight = Math.max(0, difference - 0.055) ** 2;
+      weightedX += x * weight; weightedY += y * weight; total += weight;
+    }
+  }
+  return total > 0.01 ? { x: weightedX / total, y: weightedY / total } : { x: cx, y: cy };
+}
+
+/**
+ * Find ball-sized circular boundaries independently from the color mask. This
+ * recovers green balls and separates touching balls. A radial-support check
+ * rejects one-sided shadows and long lighting edges.
+ */
+function circularCandidates(image, felt, radius) {
+  const candidates = [];
+  const stride = Math.max(1, Math.floor(radius / 2.5));
+  const edge = Math.ceil(radius * 1.7);
+  const directions = 16;
+  for (let cy = edge; cy < image.height - edge; cy += stride) {
+    for (let cx = edge; cx < image.width - edge; cx += stride) {
+      const inner = meanDiskColor(image, cx, cy, radius * 0.58);
+      const innerHsv = rgbToHsv(...inner);
+      let outerR = 0, outerG = 0, outerB = 0, support = 0;
+      const radialContrasts = [];
+      for (let d = 0; d < directions; d++) {
+        const angle = d / directions * Math.PI * 2;
+        const ix = cx + Math.cos(angle) * radius * 0.68;
+        const iy = cy + Math.sin(angle) * radius * 0.68;
+        const ox = cx + Math.cos(angle) * radius * 1.42;
+        const oy = cy + Math.sin(angle) * radius * 1.42;
+        const inside = sampleColor(image, ix, iy);
+        const outside = sampleColor(image, ox, oy);
+        outerR += outside[0]; outerG += outside[1]; outerB += outside[2];
+        const radialContrast = colorDistance(inside, outside);
+        radialContrasts.push(radialContrast);
+        if (radialContrast > 0.025) support++;
+      }
+      const outer = [outerR / directions, outerG / directions, outerB / directions];
+      const outerHsv = rgbToHsv(...outer);
+      const contrast = colorDistance(inner, outer);
+      const supportRatio = support / directions;
+      const contrastMean = radialContrasts.reduce((sum, value) => sum + value, 0) / directions;
+      const contrastStd = Math.sqrt(radialContrasts.reduce((sum, value) => sum + (value - contrastMean) ** 2, 0) / directions);
+      const sameFeltHue = hueDistance(innerHsv.h, felt.hsv.h) < 11 && Math.abs(innerHsv.s - felt.hsv.s) < 0.16;
+      const shadowLike = sameFeltHue && innerHsv.v < outerHsv.v * 0.72;
+      const score = contrast * 0.65 + supportRatio * 0.35;
+      const subtleGreenBall = hueDistance(innerHsv.h, felt.hsv.h) < 15 &&
+        Math.abs(innerHsv.s - felt.hsv.s) < 0.16 && innerHsv.v > felt.hsv.v * 1.05 &&
+        supportRatio >= 0.94 && contrastStd < 0.04 && contrast >= 0.045;
+      if (shadowLike || contrast < 0.032 || supportRatio < 0.56 || (score < 0.43 && !subtleGreenBall)) continue;
+      const refined = refineCandidateCenter(image, cx, cy, radius, felt.rgb);
+      candidates.push({
+        imageX: refined.x,
+        imageY: refined.y,
+        score,
+        rgb: inner,
+        hsv: innerHsv,
+        metrics: { contrast, supportRatio, contrastStd, outerFeltDistance: colorDistance(outer, felt.rgb) },
+      });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const selected = [];
+  for (const candidate of candidates) {
+    if (selected.some(other => Math.hypot(candidate.imageX - other.imageX, candidate.imageY - other.imageY) < radius * 1.55)) continue;
+    selected.push(candidate);
+    if (selected.length >= 24) break;
+  }
+  return selected;
+}
+
 /** Locate ball-sized color components on an already rectified 2:1 table image. */
 export function detectBallsOnTable(image) {
   validateImage(image);
@@ -275,6 +376,10 @@ export function detectBallsOnTable(image) {
       }
     }
     value /= total; saturation /= total;
+    const avgHsv = rgbToHsv(rr / total, gg / total, bb / total);
+    const shadowLike = hueDistance(avgHsv.h, felt.hsv.h) < 11 &&
+      Math.abs(avgHsv.s - felt.hsv.s) < 0.16 && avgHsv.v < felt.hsv.v * 0.72;
+    if (shadowLike) continue;
     const kind = value > 0.68 && saturation < 0.32 ? 'cue' : 'object';
     balls.push({
       x: cx / (width - 1) * TABLE_W,
@@ -284,16 +389,43 @@ export function detectBallsOnTable(image) {
       color: `rgb(${Math.round(rr / total)}, ${Math.round(gg / total)}, ${Math.round(bb / total)})`,
       imageX: cx,
       imageY: cy,
+      origin: 'component',
     });
   }
-  balls.sort((a, b) => (a.kind === 'cue' ? -1 : 1) - (b.kind === 'cue' ? -1 : 1) || b.confidence - a.confidence);
+
+  for (const candidate of circularCandidates(image, felt, radius)) {
+    if (balls.some(ball => Math.hypot(ball.imageX - candidate.imageX, ball.imageY - candidate.imageY) < radius * 0.9)) continue;
+    const kind = candidate.hsv.v > 0.68 && candidate.hsv.s < 0.32 ? 'cue' : 'object';
+    balls.push({
+      x: candidate.imageX / (width - 1) * TABLE_W,
+      y: candidate.imageY / (height - 1) * TABLE_H,
+      kind,
+      confidence: Math.max(0, Math.min(1, candidate.score * 1.8)),
+      color: `rgb(${Math.round(candidate.rgb[0])}, ${Math.round(candidate.rgb[1])}, ${Math.round(candidate.rgb[2])})`,
+      imageX: candidate.imageX,
+      imageY: candidate.imageY,
+      origin: 'circle',
+      circleMetrics: candidate.metrics,
+    });
+  }
+
+  balls.sort((a, b) => b.confidence - a.confidence);
+  const separated = [];
+  for (const ball of balls) {
+    // A ball-sized highlight often creates two strong radial peaks on the same
+    // sphere. Keep one center per diameter while preserving truly touching
+    // balls, whose centers remain about 2 radii apart.
+    if (separated.some(other => Math.hypot(ball.imageX - other.imageX, ball.imageY - other.imageY) < radius * 1.78)) continue;
+    separated.push(ball);
+  }
+  separated.sort((a, b) => (a.kind === 'cue' ? -1 : 1) - (b.kind === 'cue' ? -1 : 1) || b.confidence - a.confidence);
   // A real table has one cue ball. Keep the most confident white candidate and treat extras as object balls.
   let keptCue = false;
-  for (const ball of balls) {
+  for (const ball of separated) {
     if (ball.kind === 'cue' && !keptCue) keptCue = true;
     else if (ball.kind === 'cue') ball.kind = 'object';
   }
-  return balls.slice(0, 16);
+  return separated.slice(0, 16);
 }
 
 export function analyzeTablePhoto(image, options = {}) {
@@ -320,7 +452,10 @@ export function analyzeTablePhoto(image, options = {}) {
 /** Select the shortest valid kick route among object-ball / pocket combinations. */
 export function findBestPhotoRoute(cue, objects, cushionCount, options = {}) {
   if (!cue || !Array.isArray(objects) || !objects.length) return null;
-  const indexes = Number.isInteger(options.targetIndex) ? [options.targetIndex] : objects.map((_, i) => i);
+  const indexes = Array.isArray(options.targetIndexes)
+    ? [...new Set(options.targetIndexes.filter(index => Number.isInteger(index) && index >= 0 && index < objects.length))]
+    : Number.isInteger(options.targetIndex) ? [options.targetIndex] : objects.map((_, i) => i);
+  if (!indexes.length) return null;
   let best = null;
   for (const index of indexes) {
     const target = objects[index];

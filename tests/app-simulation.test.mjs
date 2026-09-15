@@ -76,3 +76,14 @@ test('a high-speed shot through a side-pocket mouth is not bounced by the safety
   app.advance(100, 120);
   assert.equal(app.run('simResult?.cueScratched'), true);
 });
+
+test('a fast impact just outside a side-pocket mouth uses the spin-aware cushion response', async () => {
+  const app = await createApp();
+  app.run(`balls=[{type:'cue',x:1320,y:300}]; pocketTarget={x:1270,y:0}; cueSpeed=10;
+    cueFaceHitX=.5; cueFaceHitY=.5;
+    testRoute={points:[{x:1320,y:300}],cushionPoints:[{x:1320,y:0}],sequence:['top']};
+    runSimulation(testRoute); simPhysicsBodies[0].vx=0; simPhysicsBodies[0].vy=-10000; simPhysicsBodies[0].sideOmega=100;`);
+  app.advance(50, 120);
+  assert.ok(app.run('simPhysicsBodies[0].vy') > 0, 'ball should rebound into the table');
+  assert.ok(Math.abs(app.run('simPhysicsBodies[0].vx')) > 1, 'rail friction should couple side spin into tangential speed');
+});
